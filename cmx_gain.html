@@ -243,8 +243,19 @@ function generate() {
 
   // ── Dots at key points ────────────────────────────────────────────────────
 
+  // ── Point labels B, C, E, G ──────────────────────────────────────────────
+  const lox = X_MAX * 0.012, loy = y_max * 0.035;
+  const lbls = [
+    [x_B_GB - lox*3,   y_B + loy,        'B'],
+    [x_C_eff + lox,    y_C_actual + loy,  'C'],
+    [x_C_eff + lox,    y_B + loy,         'E'],
+    [x_B_GB - lox*3,   loy * 0.5,         'G'],
+  ];
+  lbls.forEach(([x,y,t]) =>
+    annotations.push({ x, y, text:`<b>${t}</b>`, showarrow:false,
+      font:{size:13,color:'#777'}, xref:'x', yref:'y' }));
+
   // ── Reference labels (right edge) ────────────────────────────────────────
-  const loy = y_max * 0.035;
   annotations.push({ x:X_MAX, y:RECOMP+loy*0.6, text:'recompute',
     showarrow:false, font:{size:10,color:BLACK}, xanchor:'right', xref:'x', yref:'y' });
   annotations.push({ x:X_MAX, y:CMX_REQ_SEC+loy*0.6, text:'CMX<sub>BW</sub>',
@@ -306,7 +317,6 @@ function generate() {
 
   // Always include key points
   const must_include = [x_A_GB, x_B_GB, x_C_GB];
-  if (!sol_limited && x_D_GB <= X_MAX * 0.97) must_include.push(x_D_GB);
 
   // Merge: replace nearest evenly-spaced tick with key point if close enough
   const all = new Set(evenly.map(Math.round));
@@ -318,7 +328,11 @@ function generate() {
     all.add(rounded);
   });
 
-  const fticks = Array.from(all).filter(v => v >= 0 && v <= X_MAX).sort((a,b)=>a-b);
+  // Remove any tick too close to x_D_GB
+  const d_rounded = Math.round(x_D_GB);
+  const fticks = Array.from(all)
+    .filter(v => v >= 0 && v <= X_MAX && Math.abs(v - d_rounded) > X_MAX * 0.02)
+    .sort((a,b)=>a-b);
 
   // ── Agents labels below x-axis ───────────────────────────────────────────
   fticks.forEach(x => {
@@ -334,7 +348,7 @@ function generate() {
 
   const layout = {
     xaxis: {
-      title: { text:'<b>Capacity</b>', font:{size:12} },
+      title: { text:'<b>Active Capacity</b>', font:{size:12}, standoff:4 },
       range: [0, X_MAX],
       tickmode:'array',
       tickvals: fticks,
