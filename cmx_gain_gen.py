@@ -17,7 +17,7 @@ Parameters:
   CMX_BW_GB            : CMX bandwidth (GB/s per GPU)
   HBM_DRAM_SIZE_GB     : HBM DRAM size (GB)
   RECOMPUTE_REQ_SEC    : recompute throughput (reqs/sec)
-  SOL_REQ_SECOND       : speed-of-light throughput (reqs/sec)
+  GPU_SOL_REQ_SECONDS       : speed-of-light throughput (reqs/sec)
   AVG_AGENT_CAP_SIZE_IN_GB   : average request KV-cache size (GB/req)
 
 Derived:
@@ -27,7 +27,7 @@ Derived:
 
 Usage:
   python3 cmx_gain_gen.py T_BETWEEN_STEPS_SEC CMX_BW_GB HBM_DRAM_SIZE_GB \\
-                          RECOMPUTE_REQ_SEC SOL_REQ_SECOND AVG_AGENT_CAP_SIZE_IN_GB \\
+                          RECOMPUTE_REQ_SEC GPU_SOL_REQ_SECONDS AVG_AGENT_CAP_SIZE_IN_GB \\
                           [--output path.png]
 
 Example:
@@ -44,7 +44,7 @@ from matplotlib.patches import FancyBboxPatch
 
 
 def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
-             RECOMPUTE_REQ_SEC, SOL_REQ_SECOND, AVG_AGENT_CAP_SIZE_IN_GB,
+             RECOMPUTE_REQ_SEC, GPU_SOL_REQ_SECONDS, AVG_AGENT_CAP_SIZE_IN_GB,
              output=None):
 
     T   = T_BETWEEN_STEPS_SEC
@@ -62,13 +62,13 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
     x_A_GB = RECOMPUTE_REQ_SEC / slope             # = RECOMPUTE * AVG * T
     x_B_GB = HBM_DRAM_SIZE_GB                      # HBM spill point
     x_C_GB = HBM_DRAM_SIZE_GB + CMX_T_GB           # CMX capacity exhausted
-    x_D_GB = SOL_REQ_SECOND   / slope              # = SOL * AVG * T  (blue hits SOL)
+    x_D_GB = GPU_SOL_REQ_SECONDS   / slope              # = SOL * AVG * T  (blue hits SOL)
 
     # Key y positions
     y_A = RECOMPUTE_REQ_SEC
     y_B = x_B_GB * slope                           # = HBM / (AVG * T)
     y_C = x_C_GB * slope                           # = y_B + CMX_REQ_SEC  (may exceed SOL)
-    y_D = SOL_REQ_SECOND
+    y_D = GPU_SOL_REQ_SECONDS
 
     # ── Print results ───────────────────────────────────────────────────
     print()
@@ -78,7 +78,7 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
     print(f'  HBM_DRAM_SIZE_GB     : {HBM_DRAM_SIZE_GB} GB')
     print(f'  AVG_AGENT_CAP_SIZE_IN_GB   : {AVG} GB/req')
     print(f'  RECOMPUTE_REQ_SEC    : {RECOMPUTE_REQ_SEC} reqs/sec')
-    print(f'  SOL_REQ_SECOND       : {SOL_REQ_SECOND} reqs/sec')
+    print(f'  GPU_SOL_REQ_SECONDS       : {GPU_SOL_REQ_SECONDS} reqs/sec')
     print()
     print(f'  CMX_T_GB  (Little)   : {CMX_T_GB:.1f} GB')
     print(f'  CMX_REQ_SEC          : {CMX_REQ_SEC:.2f} reqs/sec')
@@ -89,20 +89,20 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
 
     # ── Validation ──────────────────────────────────────────────────────
     warnings = []
-    if not (RECOMPUTE_REQ_SEC < CMX_REQ_SEC < SOL_REQ_SECOND):
+    if not (RECOMPUTE_REQ_SEC < CMX_REQ_SEC < GPU_SOL_REQ_SECONDS):
         warnings.append(
             f'  Recompute throughput ({RECOMPUTE_REQ_SEC} reqs/sec) should be smaller than '
             f'CMX throughput ({CMX_REQ_SEC:.2f} reqs/sec) that should be smaller than '
-            f'SOL ({SOL_REQ_SECOND} reqs/sec)')
+            f'SOL ({GPU_SOL_REQ_SECONDS} reqs/sec)')
     if not (y_B > RECOMPUTE_REQ_SEC):
         cmx_vs_recompute = CMX_REQ_SEC / RECOMPUTE_REQ_SEC
         warnings.append(
             f'  Spill point B ({y_B:.2f} reqs/sec) is below RECOMPUTE ({RECOMPUTE_REQ_SEC} reqs/sec) — '
             f'it\'s better to recompute than to use HBM-DRAM; '
             f'gain = CMX_BW(reqs/sec) / RECOMPUTE = {CMX_REQ_SEC:.2f} / {RECOMPUTE_REQ_SEC} = {cmx_vs_recompute:.2f}x')
-    if not (y_B < SOL_REQ_SECOND):
+    if not (y_B < GPU_SOL_REQ_SECONDS):
         warnings.append(
-            f'  Spill point B ({y_B:.2f} reqs/sec) >= SOL ({SOL_REQ_SECOND} reqs/sec) — '
+            f'  Spill point B ({y_B:.2f} reqs/sec) >= SOL ({GPU_SOL_REQ_SECONDS} reqs/sec) — '
             f"HBM-DRAM is sufficient, don't need CMX")
     if warnings:
         print('\033[1;31m\n  ██ DEGENERATE CASE ██\033[0m')
@@ -114,12 +114,12 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
     # ── Chart parameters ────────────────────────────────────────────────
     # If CMX capacity extends past D (SOL point), C merges into D — no benefit beyond SOL
     x_C_eff   = min(x_C_GB, x_D_GB)
-    y_C_actual = min(y_C, SOL_REQ_SECOND)   # = SOL when C is capped at D
+    y_C_actual = min(y_C, GPU_SOL_REQ_SECONDS)   # = SOL when C is capped at D
     sol_limited = (x_C_GB > x_D_GB)         # True when C was moved left to D
 
     X_MAX  = HBM_DRAM_SIZE_GB + CMX_T_GB * 4.5
     DROP   = CMX_T_GB * 1.2
-    y_max  = SOL_REQ_SECOND * 1.12
+    y_max  = GPU_SOL_REQ_SECONDS * 1.12
     dy     = y_B * 0.016   # small offset so coincident lines are both visible
 
     # ── Plot setup ───────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
     # ── Segment B→C_eff: blue and green rise together, capped at SOL ────────
     # (x_C_eff = min(x_C_GB, x_D_GB): if CMX capacity extends past D, C merges into D)
     C_bc  = np.linspace(x_B_GB, x_C_eff, 200)
-    y_bc  = np.minimum(y_B + slope * (C_bc - x_B_GB), SOL_REQ_SECOND)
+    y_bc  = np.minimum(y_B + slope * (C_bc - x_B_GB), GPU_SOL_REQ_SECONDS)
     ax.plot(C_bc, y_bc+dy, color=BLUE,  lw=2.5, label='infinite HBM')
     ax.plot(C_bc, y_bc,    color=GREEN, lw=2.5, label='with CMX')
 
@@ -167,7 +167,7 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
 
     # ── Green: if sol_limited, stay flat at SOL from x_C_eff to original x_C_GB ──
     if sol_limited:
-        ax.plot([x_C_eff, x_C_GB], [SOL_REQ_SECOND, SOL_REQ_SECOND], color=GREEN, lw=2.5)
+        ax.plot([x_C_eff, x_C_GB], [GPU_SOL_REQ_SECONDS, GPU_SOL_REQ_SECONDS], color=GREEN, lw=2.5)
     # ── Green drops at original x_C_GB ───────────────────────────────────
     ax.plot([x_C_GB, x_C_GB+DROP], [y_C_actual, CMX_REQ_SEC], color=GREEN, lw=2.5)
     ax.plot([x_C_GB+DROP, X_MAX],  [CMX_REQ_SEC, CMX_REQ_SEC], color=GREEN, lw=2.5)
@@ -178,15 +178,15 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
         ax.plot(C_solo, y_B + slope*(C_solo - x_B_GB), color=BLUE, lw=2.5)
     x_flat_start = max(x_C_eff, x_D_GB)
     if x_flat_start < X_MAX:
-        ax.plot([x_flat_start, X_MAX], [SOL_REQ_SECOND, SOL_REQ_SECOND], color=BLUE, lw=2.5)
+        ax.plot([x_flat_start, X_MAX], [GPU_SOL_REQ_SECONDS, GPU_SOL_REQ_SECONDS], color=BLUE, lw=2.5)
 
     # ── Reference lines ──────────────────────────────────────────────────
     ax.axhline(y=y_A,           color='black', lw=1.5, linestyle=':', alpha=0.7)
     ax.text(X_MAX*0.99, y_A + y_max*0.012, 'recompute', ha='right', fontsize=10, color='black')
     ax.axhline(y=CMX_REQ_SEC,   color=GREEN,  lw=1.5, linestyle=':', alpha=0.7)
     ax.text(X_MAX*0.99, CMX_REQ_SEC + y_max*0.012, r'$CMX_{BW}$', ha='right', fontsize=10, color=GREEN)
-    ax.axhline(y=SOL_REQ_SECOND, color=BLUE,  lw=1.8, linestyle=':', alpha=0.85)
-    ax.text(X_MAX*0.99, SOL_REQ_SECOND + y_max*0.012, 'SOL', ha='right', fontsize=10, color=BLUE, fontweight='bold')
+    ax.axhline(y=GPU_SOL_REQ_SECONDS, color=BLUE,  lw=1.8, linestyle=':', alpha=0.85)
+    ax.text(X_MAX*0.99, GPU_SOL_REQ_SECONDS + y_max*0.012, 'SOL', ha='right', fontsize=10, color=BLUE, fontweight='bold')
 
     # ── Vertical spill markers ────────────────────────────────────────────
     ax.axvline(x=x_B_GB,  color='#888', lw=1.5, linestyle=':')
@@ -227,7 +227,7 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
     ax.plot(x_C_GB,  0,          'v', color='#555',  ms=8, zorder=6, clip_on=False)
     # D dot only when it is separate from C
     if x_D_GB <= X_MAX and not sol_limited:
-        ax.plot(x_D_GB, SOL_REQ_SECOND, 'o', color=BLUE, ms=8, zorder=5)
+        ax.plot(x_D_GB, GPU_SOL_REQ_SECONDS, 'o', color=BLUE, ms=8, zorder=5)
 
     # ── Point labels ──────────────────────────────────────────────────────
     lx = X_MAX * 0.022
@@ -238,7 +238,7 @@ def generate(T_BETWEEN_STEPS_SEC, CMX_BW_GB, HBM_DRAM_SIZE_GB,
     c_label = 'C,D' if sol_limited else 'C'
     ax.text(x_C_eff + lx*0.5, y_C_actual   + ly, c_label,          fontsize=12, fontweight='bold', color=gray, zorder=7)
     if x_D_GB <= X_MAX and not sol_limited:
-        ax.text(x_D_GB - lx*2.0, SOL_REQ_SECOND + ly, 'D',         fontsize=12, fontweight='bold', color=gray, zorder=7)
+        ax.text(x_D_GB - lx*2.0, GPU_SOL_REQ_SECONDS + ly, 'D',         fontsize=12, fontweight='bold', color=gray, zorder=7)
     ax.text(x_C_eff + lx*0.5, y_B          + ly, 'E',              fontsize=12, fontweight='bold', color=gray, zorder=7)
     ax.text(x_B_GB  - lx*1.4, y_max*0.022,       'G',              fontsize=12, fontweight='bold', color=gray, zorder=7)
 
@@ -318,10 +318,10 @@ if __name__ == '__main__':
     p.add_argument('--CMX_BW_GB',            type=float, required=True, help='CMX bandwidth (GB/s per GPU)')
     p.add_argument('--HBM_DRAM_SIZE_GB',     type=float, required=True, help='HBM DRAM size (GB)')
     p.add_argument('--RECOMPUTE_REQ_SEC',    type=float, required=True, help='Recompute throughput (reqs/sec)')
-    p.add_argument('--SOL_REQ_SECOND',       type=float, required=True, help='Speed-of-light throughput (reqs/sec)')
+    p.add_argument('--GPU_SOL_REQ_SECONDS',       type=float, required=True, help='Speed-of-light throughput (reqs/sec)')
     p.add_argument('--AVG_AGENT_CAP_SIZE_IN_GB',   type=float, required=True, help='Average request KV-cache size (GB/req)')
     p.add_argument('--output', '-o',         type=str,   default=None,  help='Output PNG path')
     a = p.parse_args()
     generate(a.T_BETWEEN_STEPS_SEC, a.CMX_BW_GB, a.HBM_DRAM_SIZE_GB,
-             a.RECOMPUTE_REQ_SEC, a.SOL_REQ_SECOND, a.AVG_AGENT_CAP_SIZE_IN_GB,
+             a.RECOMPUTE_REQ_SEC, a.GPU_SOL_REQ_SECONDS, a.AVG_AGENT_CAP_SIZE_IN_GB,
              a.output)

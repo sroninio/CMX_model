@@ -49,7 +49,6 @@
 <body>
 <div class="container">
   <h1>CMX Capacity Gain</h1>
-  <div class="sub">KV-cache throughput model — concurrency vs reqs/sec</div>
 
   <div class="controls">
     <h2>Parameters</h2>
@@ -71,7 +70,7 @@
         <input type="number" id="RECOMPUTE" value="1" step="0.1" min="0.01">
       </div>
       <div class="param">
-        <label>SOL_REQ_SECOND (reqs/s)</label>
+        <label>GPU_SOL_REQ_SECONDS (reqs/s)</label>
         <input type="number" id="SOL" value="12.5" step="0.1" min="0.1">
       </div>
       <div class="param">
@@ -88,10 +87,10 @@
   </div>
 
   <div class="stats" id="stats">
-    <div class="stat"><div class="val" id="s-cmxt">—</div><div class="lbl">CMX_T_GB (Little's Law)</div></div>
-    <div class="stat"><div class="val" id="s-cmxreq">—</div><div class="lbl">CMX_REQ_SEC</div></div>
-    <div class="stat"><div class="val" id="s-yb">—</div><div class="lbl">y_B spill point</div></div>
-    <div class="stat"><div class="val" id="s-gain" style="color:#c0392b">—</div><div class="lbl">gain_ratio CE/BG</div></div>
+    <div class="stat"><div class="val" id="s-cmxt">—</div><div class="lbl">CMX used capacity</div></div>
+    <div class="stat"><div class="val" id="s-with">—</div><div class="lbl">reqs/sec with CMX</div></div>
+    <div class="stat"><div class="val" id="s-without">—</div><div class="lbl">reqs/sec without CMX</div></div>
+    <div class="stat"><div class="val" id="s-gain" style="color:#c0392b">—</div><div class="lbl">gain ratio</div></div>
   </div>
 
   <div id="chart"></div>
@@ -135,11 +134,11 @@ function generate() {
   // ── Degenerate case checks ───────────────────────────────────────────────
   const errs = [];
   if (!(RECOMP < CMX_REQ_SEC && CMX_REQ_SEC < SOL))
-    errs.push(`Recompute (${RECOMP}) should be &lt; CMX_REQ_SEC (${CMX_REQ_SEC.toFixed(2)}) &lt; SOL (${SOL})`);
+    errs.push(`RECOMPUTE < CMX_REQ_SEC < SOL not satisfied`);
   if (!(y_B > RECOMP))
-    errs.push(`Spill point B (${y_B.toFixed(2)} reqs/s) ≤ RECOMPUTE — better to recompute than use HBM-DRAM; gain = ${(CMX_REQ_SEC/RECOMP).toFixed(2)}x`);
+    errs.push(`Better to recompute than use HBM-DRAM — gain = CMX_REQ_SEC / RECOMPUTE = ${CMX_REQ_SEC.toFixed(2)} / ${RECOMP} = ${(CMX_REQ_SEC/RECOMP).toFixed(2)}x`);
   if (!(y_B < SOL))
-    errs.push(`Spill point B (${y_B.toFixed(2)} reqs/s) ≥ SOL — HBM-DRAM is sufficient, don't need CMX`);
+    errs.push(`HBM-DRAM is sufficient — no CMX needed`);
 
   const eb = document.getElementById('error-box');
   if (errs.length) {
@@ -154,12 +153,11 @@ function generate() {
   // ── Stats bar ────────────────────────────────────────────────────────────
   const statsEl = document.getElementById('stats');
   statsEl.style.display = 'grid';
-  document.getElementById('s-cmxt').textContent    = CMX_T_GB.toFixed(1) + ' GB';
-  document.getElementById('s-cmxreq').textContent  = CMX_REQ_SEC.toFixed(2) + ' reqs/s';
-  document.getElementById('s-yb').textContent      = y_B.toFixed(2) + ' reqs/s';
-  document.getElementById('s-gain').textContent    = (sol_limited ? gain_actual : gain_ratio) * 100 + '%';
-  document.getElementById('s-gain').textContent    =
-    ((sol_limited ? gain_actual : gain_ratio) * 100).toFixed(1) + '%';
+  const cmx_used = sol_limited ? (x_D_GB - x_B_GB) : CMX_T_GB;
+  document.getElementById('s-cmxt').textContent   = cmx_used.toFixed(1) + ' GB';
+  document.getElementById('s-with').textContent   = y_C_actual.toFixed(2) + ' reqs/s';
+  document.getElementById('s-without').textContent = y_B.toFixed(2) + ' reqs/s';
+  document.getElementById('s-gain').textContent   = (gain_actual * 100).toFixed(1) + '%';
 
   // ── Layout constants ─────────────────────────────────────────────────────
   const DROP  = (x_C_GB - x_B_GB) * 0.3;
@@ -218,7 +216,7 @@ function generate() {
       line:{color:BLUE,width:2.5}, showlegend:false, hoverinfo:'skip' });
   }
   if (x_D_GB <= X_MAX)
-    traces.push({ x:[x_D_GB, X_MAX], y:[SOL,SOL], mode:'lines',
+    traces.push({ x:[x_D_GB, X_MAX], y:[SOL+dy, SOL+dy], mode:'lines',
       line:{color:BLUE,width:2.5}, name:'infinite HBM-DRAM', hoverinfo:'skip' });
 
   // ── Black: drops at B to RECOMPUTE, then flat ────────────────────────────
@@ -244,72 +242,43 @@ function generate() {
       line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
 
   // ── Dots at key points ────────────────────────────────────────────────────
-  const pts = [
-    [x_A_GB,  y_A,       '#777'],
-    [x_B_GB,  y_B,       BLACK],
-    [x_C_eff, y_C_actual, BLUE],
-    [x_C_eff, y_B,        '#777'],
-    [x_B_GB,  0,          '#777'],
-  ];
-  if (!sol_limited) pts.push([x_D_GB, SOL, BLUE]);
-  pts.forEach(([x,y,c]) =>
-    traces.push({ x:[x],y:[y], mode:'markers', marker:{color:c,size:9},
-      showlegend:false, hoverinfo:'skip' }));
-
-  // ── Point labels ─────────────────────────────────────────────────────────
-  const lox = X_MAX * 0.012, loy = y_max * 0.035;
-  const lbls = [
-    [x_A_GB - lox*2.5, y_A + loy, 'A'],
-    [x_B_GB - lox*3,   y_B + loy, 'B'],
-    [x_C_eff + lox,    y_C_actual + loy, sol_limited ? 'C,D' : 'C'],
-    [x_C_eff + lox,    y_B + loy, 'E'],
-    [x_B_GB - lox*3,   loy * 0.5, 'G'],
-  ];
-  if (!sol_limited) lbls.push([x_D_GB - lox*3, SOL + loy, 'D']);
-  lbls.forEach(([x,y,t]) =>
-    annotations.push({ x, y, text:`<b>${t}</b>`, showarrow:false,
-      font:{size:13,color:'#777'}, xref:'x', yref:'y' }));
 
   // ── Reference labels (right edge) ────────────────────────────────────────
+  const loy = y_max * 0.035;
   annotations.push({ x:X_MAX, y:RECOMP+loy*0.6, text:'recompute',
     showarrow:false, font:{size:10,color:BLACK}, xanchor:'right', xref:'x', yref:'y' });
   annotations.push({ x:X_MAX, y:CMX_REQ_SEC+loy*0.6, text:'CMX<sub>BW</sub>',
     showarrow:false, font:{size:10,color:GREEN}, xanchor:'right', xref:'x', yref:'y' });
-  annotations.push({ x:X_MAX, y:SOL+loy*0.6, text:'<b>SOL</b>',
-    showarrow:false, font:{size:10,color:BLUE}, xanchor:'right', xref:'x', yref:'y' });
+
+  // ── Helper: double-headed arrow as two annotations ───────────────────────
+  function dblArrow(x1, y1, x2, y2, color, width) {
+    const base = { xref:'x', yref:'y', axref:'x', ayref:'y',
+                   arrowhead:2, arrowside:'end', showarrow:true, text:'' };
+    annotations.push({ ...base, x:x2, y:y2, ax:x1, ay:y1, arrowcolor:color, arrowwidth:width });
+    annotations.push({ ...base, x:x1, y:y1, ax:x2, ay:y2, arrowcolor:color, arrowwidth:width });
+  }
 
   // ── Arrows ────────────────────────────────────────────────────────────────
-  // 0→B horizontal (black)
-  annotations.push({ x:x_B_GB, y:0, ax:0, ay:0,
-    xref:'x', yref:'y', axref:'x', ayref:'y',
-    arrowhead:2, arrowside:'both', arrowcolor:BLACK, arrowwidth:2.5,
-    showarrow:true, text:'' });
-  // BG vertical (red)
-  annotations.push({ x:x_B_GB, y:y_B, ax:x_B_GB, ay:0,
-    xref:'x', yref:'y', axref:'x', ayref:'y',
-    arrowhead:2, arrowside:'both', arrowcolor:'#c0392b', arrowwidth:2,
-    showarrow:true, text:'' });
-  // BE horizontal (dark)
-  annotations.push({ x:x_C_eff, y:y_B, ax:x_B_GB, ay:y_B,
-    xref:'x', yref:'y', axref:'x', ayref:'y',
-    arrowhead:2, arrowside:'both', arrowcolor:'#333', arrowwidth:2,
-    showarrow:true, text:'' });
-  // CE vertical (red)
-  annotations.push({ x:x_C_eff, y:y_C_actual, ax:x_C_eff, ay:y_B,
-    xref:'x', yref:'y', axref:'x', ayref:'y',
-    arrowhead:2, arrowside:'both', arrowcolor:'#c0392b', arrowwidth:2.5,
-    showarrow:true, text:'' });
+  dblArrow(0,      0,    x_B_GB,    0,       BLACK,      2.5);  // 0→B horizontal
+  dblArrow(x_B_GB, 0,    x_B_GB,    y_B,     '#c0392b',  2.0);  // BG vertical
+  dblArrow(x_B_GB, y_B,  x_C_eff,   y_B,     '#333',     2.0);  // BE horizontal
+  dblArrow(x_C_eff,y_B,  x_C_eff,   y_C_actual,'#c0392b',2.5);  // CE vertical
 
-  // ── CMX_BW·T span label (x-axis level) ───────────────────────────────────
-  const span_y = y_max * 0.07;
-  annotations.push({ x:(x_B_GB+x_C_GB)/2, y:span_y + y_max*0.03,
+  // ── HBM-DRAM and CMX_BW·T span labels (top of chart) ────────────────────
+  const span_y = y_max * 0.93;
+  const lbl_y  = span_y + y_max * 0.03;
+
+  // HBM-DRAM span (0 → B)
+  dblArrow(0, span_y, x_B_GB, span_y, '#888', 1.5);
+  annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
+    text: '<b>HBM-DRAM</b>', showarrow:false,
+    font:{size:10, color:'#888'}, xanchor:'center', yanchor:'bottom' });
+
+  // CMX_BW·T span (B → C)
+  dblArrow(x_B_GB, span_y, x_C_GB, span_y, '#555', 1.5);
+  annotations.push({ x:(x_B_GB+x_C_GB)/2, y: lbl_y, xref:'x', yref:'y',
     text:"CMX<sub>BW</sub> · T<sub>between_steps</sub>  (Little's Law)",
-    showarrow:false, font:{size:10,color:'#555'},
-    xanchor:'center', yanchor:'bottom', xref:'x', yref:'y' });
-  annotations.push({ x:x_C_GB, y:span_y, ax:x_B_GB, ay:span_y,
-    xref:'x', yref:'y', axref:'x', ayref:'y',
-    arrowhead:2, arrowside:'both', arrowcolor:'#555', arrowwidth:1.5,
-    showarrow:true, text:'' });
+    showarrow:false, font:{size:10,color:'#555'}, xanchor:'center', yanchor:'bottom' });
 
   // ── Formula box ──────────────────────────────────────────────────────────
   const box_x = X_MAX * 0.17;
@@ -329,38 +298,62 @@ function generate() {
   }
 
   // ── X-axis ticks (GB + agents) ────────────────────────────────────────────
-  const n_ticks = 8;
-  const key_xs = new Set([x_A_GB, x_B_GB, x_C_GB]);
-  if (!sol_limited && x_D_GB <= X_MAX * 0.97) key_xs.add(x_D_GB);
-  for (let i = 0; i <= n_ticks; i++) key_xs.add(X_MAX * i / n_ticks);
-  let ticks = Array.from(key_xs).sort((a,b)=>a-b);
-  const min_gap = X_MAX * 0.05;
-  const fticks = [ticks[0]];
-  for (let i = 1; i < ticks.length; i++) {
-    if (ticks[i] - fticks[fticks.length-1] >= min_gap) fticks.push(ticks[i]);
-  }
+  // Start with evenly spaced ticks across full range
+  const n_ticks = 7;
+  const tick_step = Math.ceil(X_MAX / n_ticks / 50) * 50;  // round to nearest 50
+  const evenly = [];
+  for (let v = 0; v <= X_MAX + tick_step; v += tick_step) evenly.push(v);
+
+  // Always include key points
+  const must_include = [x_A_GB, x_B_GB, x_C_GB];
+  if (!sol_limited && x_D_GB <= X_MAX * 0.97) must_include.push(x_D_GB);
+
+  // Merge: replace nearest evenly-spaced tick with key point if close enough
+  const all = new Set(evenly.map(Math.round));
+  must_include.forEach(kx => {
+    const rounded = Math.round(kx);
+    // remove any tick within 4% of X_MAX from the key point
+    const threshold = X_MAX * 0.04;
+    for (const t of all) { if (Math.abs(t - rounded) < threshold && t !== rounded) all.delete(t); }
+    all.add(rounded);
+  });
+
+  const fticks = Array.from(all).filter(v => v >= 0 && v <= X_MAX).sort((a,b)=>a-b);
+
+  // ── Agents labels below x-axis ───────────────────────────────────────────
+  fticks.forEach(x => {
+    annotations.push({
+      x: x, y: -0.055,
+      xref: 'x', yref: 'paper',
+      text: `${Math.round(x/AVG)} agents`,
+      showarrow: false,
+      font: { size: 9, color: '#555' },
+      xanchor: 'center', yanchor: 'top'
+    });
+  });
 
   const layout = {
     xaxis: {
-      title: { text:'Capacity', font:{size:12} },
+      title: { text:'<b>Capacity</b>', font:{size:12} },
       range: [0, X_MAX],
       tickmode:'array',
       tickvals: fticks,
-      ticktext: fticks.map(x => `${Math.round(x)} GB\n${Math.round(x/AVG)} agents`),
+      ticktext: fticks.map(x => `${Math.round(x)} GB`),
       tickfont: { size:9 },
+      tickangle: 0,
       gridcolor:'#e8e8e8', showgrid:true, zeroline:true
     },
     yaxis: {
-      title: { text:'reqs/sec', font:{size:12} },
+      title: { text:'<b>reqs/sec</b>', font:{size:12} },
       range: [0, y_max],
       gridcolor:'#e8e8e8', showgrid:true
     },
     annotations, shapes,
     showlegend: true,
-    legend: { x:0.01, y:0.99, xanchor:'left', yanchor:'top', font:{size:10},
+    legend: { x:0.99, y:1.08, xanchor:'right', yanchor:'top', font:{size:10},
               bgcolor:'rgba(255,255,255,0.8)', bordercolor:'#ccc', borderwidth:1 },
     plot_bgcolor:'white', paper_bgcolor:'white',
-    margin: { t:50, r:80, b:70, l:65 },
+    margin: { t:50, r:80, b:80, l:65 },
     height: 560
   };
 
