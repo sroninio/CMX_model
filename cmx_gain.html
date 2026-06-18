@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CMX Capacity Gain</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+  body { font-family: Georgia, serif; background: #f4f4f4; margin: 0; padding: 20px; }
+  h1   { text-align: center; color: #222; margin-bottom: 4px; }
+  .sub { text-align: center; color: #777; font-size: 13px; margin-bottom: 20px; font-style: italic; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .controls {
+    background: white; border-radius: 8px; padding: 20px 24px 16px;
+    margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+  .controls h2 { margin: 0 0 14px; font-size: 14px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+  .param-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .param label { display: block; font-size: 11px; color: #666; margin-bottom: 4px; font-weight: bold; }
+  .param input {
+    width: 100%; box-sizing: border-box; padding: 7px 10px;
+    border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+    font-family: monospace;
+  }
+  .param input:focus { border-color: #4A90D9; outline: none; box-shadow: 0 0 0 2px rgba(74,144,217,0.2); }
+  .btn {
+    display: block; width: 100%; margin-top: 16px; padding: 11px;
+    background: #4A90D9; color: white; border: none; border-radius: 6px;
+    font-size: 15px; cursor: pointer; font-weight: bold; letter-spacing: 0.5px;
+  }
+  .btn:hover { background: #357abd; }
+  #error-box {
+    background: #fff0f0; border: 2px solid #c0392b; border-radius: 8px;
+    padding: 14px 18px; margin-bottom: 16px; display: none;
+  }
+  #error-box h3 { color: #c0392b; margin: 0 0 6px; font-size: 17px; }
+  #error-box p  { color: #c0392b; margin: 0; font-size: 13px; line-height: 1.6; }
+  .stats {
+    display: none; background: white; border-radius: 8px;
+    padding: 14px 20px; margin-bottom: 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    display: none; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  }
+  .stat { text-align: center; padding: 8px; }
+  .stat .val  { font-size: 22px; font-weight: bold; color: #4A90D9; }
+  .stat .lbl  { font-size: 11px; color: #999; margin-top: 2px; }
+  #chart { background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>CMX Capacity Gain</h1>
+  <div class="sub">KV-cache throughput model — concurrency vs reqs/sec</div>
+
+  <div class="controls">
+    <h2>Parameters</h2>
+    <div class="param-grid">
+      <div class="param">
+        <label>T_BETWEEN_STEPS_SEC (s)</label>
+        <input type="number" id="T" value="60" step="1" min="0.1">
+      </div>
+      <div class="param">
+        <label>CMX_BW_GB (GB/s per GPU)</label>
+        <input type="number" id="CMX_BW" value="4" step="0.1" min="0.01">
+      </div>
+      <div class="param">
+        <label>HBM_DRAM_SIZE_GB (GB)</label>
+        <input type="number" id="HBM" value="300" step="10" min="1">
+      </div>
+      <div class="param">
+        <label>RECOMPUTE_REQ_SEC (reqs/s)</label>
+        <input type="number" id="RECOMPUTE" value="1" step="0.1" min="0.01">
+      </div>
+      <div class="param">
+        <label>SOL_REQ_SECOND (reqs/s)</label>
+        <input type="number" id="SOL" value="12.5" step="0.1" min="0.1">
+      </div>
+      <div class="param">
+        <label>AVG_AGENT_CAP_SIZE_IN_GB (GB)</label>
+        <input type="number" id="AVG" value="0.8" step="0.05" min="0.01">
+      </div>
+    </div>
+    <button class="btn" onclick="generate()">Generate Chart</button>
+  </div>
+
+  <div id="error-box">
+    <h3>&#9888; DEGENERATE CASE</h3>
+    <p id="error-msg"></p>
+  </div>
+
+  <div class="stats" id="stats">
+    <div class="stat"><div class="val" id="s-cmxt">—</div><div class="lbl">CMX_T_GB (Little's Law)</div></div>
+    <div class="stat"><div class="val" id="s-cmxreq">—</div><div class="lbl">CMX_REQ_SEC</div></div>
+    <div class="stat"><div class="val" id="s-yb">—</div><div class="lbl">y_B spill point</div></div>
+    <div class="stat"><div class="val" id="s-gain" style="color:#c0392b">—</div><div class="lbl">gain_ratio CE/BG</div></div>
+  </div>
+
+  <div id="chart"></div>
+</div>
+
+<script>
+function linspace(a, b, n) {
+  const r = [];
+  for (let i = 0; i < n; i++) r.push(a + (b - a) * i / (n - 1));
+  return r;
+}
+
+function generate() {
+  const T        = parseFloat(document.getElementById('T').value);
+  const CMX_BW   = parseFloat(document.getElementById('CMX_BW').value);
+  const HBM      = parseFloat(document.getElementById('HBM').value);
+  const RECOMP   = parseFloat(document.getElementById('RECOMPUTE').value);
+  const SOL      = parseFloat(document.getElementById('SOL').value);
+  const AVG      = parseFloat(document.getElementById('AVG').value);
+
+  // ── Physics ──────────────────────────────────────────────────────────────
+  const CMX_T_GB    = CMX_BW * T;
+  const CMX_REQ_SEC = CMX_BW / AVG;
+  const gain_ratio  = CMX_T_GB / HBM;
+  const slope       = 1.0 / (AVG * T);
+
+  const x_A_GB = RECOMP / slope;
+  const x_B_GB = HBM;
+  const x_C_GB = HBM + CMX_T_GB;
+  const x_D_GB = SOL / slope;
+
+  const y_A = RECOMP;
+  const y_B = x_B_GB * slope;
+  const y_C = x_C_GB * slope;
+
+  const x_C_eff    = Math.min(x_C_GB, x_D_GB);
+  const y_C_actual = Math.min(y_C, SOL);
+  const sol_limited = x_C_GB > x_D_GB;
+  const gain_actual = (y_C_actual - y_B) / y_B;
+
+  // ── Degenerate case checks ───────────────────────────────────────────────
+  const errs = [];
+  if (!(RECOMP < CMX_REQ_SEC && CMX_REQ_SEC < SOL))
+    errs.push(`Recompute (${RECOMP}) should be &lt; CMX_REQ_SEC (${CMX_REQ_SEC.toFixed(2)}) &lt; SOL (${SOL})`);
+  if (!(y_B > RECOMP))
+    errs.push(`Spill point B (${y_B.toFixed(2)} reqs/s) ≤ RECOMPUTE — better to recompute than use HBM-DRAM; gain = ${(CMX_REQ_SEC/RECOMP).toFixed(2)}x`);
+  if (!(y_B < SOL))
+    errs.push(`Spill point B (${y_B.toFixed(2)} reqs/s) ≥ SOL — HBM-DRAM is sufficient, don't need CMX`);
+
+  const eb = document.getElementById('error-box');
+  if (errs.length) {
+    eb.style.display = 'block';
+    document.getElementById('error-msg').innerHTML = errs.join('<br>');
+    document.getElementById('stats').style.display = 'none';
+    Plotly.purge('chart');
+    return;
+  }
+  eb.style.display = 'none';
+
+  // ── Stats bar ────────────────────────────────────────────────────────────
+  const statsEl = document.getElementById('stats');
+  statsEl.style.display = 'grid';
+  document.getElementById('s-cmxt').textContent    = CMX_T_GB.toFixed(1) + ' GB';
+  document.getElementById('s-cmxreq').textContent  = CMX_REQ_SEC.toFixed(2) + ' reqs/s';
+  document.getElementById('s-yb').textContent      = y_B.toFixed(2) + ' reqs/s';
+  document.getElementById('s-gain').textContent    = (sol_limited ? gain_actual : gain_ratio) * 100 + '%';
+  document.getElementById('s-gain').textContent    =
+    ((sol_limited ? gain_actual : gain_ratio) * 100).toFixed(1) + '%';
+
+  // ── Layout constants ─────────────────────────────────────────────────────
+  const DROP  = (x_C_GB - x_B_GB) * 0.3;
+  const X_MAX = HBM + CMX_T_GB * 4.5;
+  const y_max = SOL * 1.18;
+  const dy    = y_max * 0.008;
+
+  const BLUE  = '#4A90D9';
+  const GREEN = '#76b900';
+  const BLACK = '#222222';
+
+  const traces = [], annotations = [], shapes = [];
+
+  // ── Dotted gray line (0,0) → A ───────────────────────────────────────────
+  traces.push({ x:[0, x_A_GB], y:[0, y_A], mode:'lines',
+    line:{ color:'#888', width:2, dash:'dot' }, showlegend:false, hoverinfo:'skip' });
+
+  // ── Helper for rising segment from B ─────────────────────────────────────
+  const yrise = x => y_B + slope * (x - x_B_GB);
+
+  // ── Segment 0→A: flat (three lines offset) ───────────────────────────────
+  [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
+    traces.push({ x:[0,x_A_GB], y:[y_A+o,y_A+o], mode:'lines',
+      line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
+
+  // ── Segment A→B: rising (three lines offset) ─────────────────────────────
+  const xs_AB = linspace(x_A_GB, x_B_GB, 200);
+  const ys_AB = xs_AB.map(x => RECOMP + slope*(x - x_A_GB));
+  [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
+    traces.push({ x:xs_AB, y:ys_AB.map(y=>y+o), mode:'lines',
+      line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
+
+  // ── Segment B→C_eff: blue+green rise (capped at SOL) ────────────────────
+  const xs_BC = linspace(x_B_GB, x_C_eff, 200);
+  const ys_BC = xs_BC.map(x => Math.min(yrise(x), SOL));
+  traces.push({ x:xs_BC, y:ys_BC.map(y=>y+dy), mode:'lines',
+    line:{color:BLUE, width:2.5}, showlegend:false, hoverinfo:'skip' });
+  traces.push({ x:xs_BC, y:ys_BC, mode:'lines',
+    line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
+
+  // ── Green: optional flat at SOL from C_eff → C_GB (sol_limited) ──────────
+  if (sol_limited)
+    traces.push({ x:[x_C_eff,x_C_GB], y:[SOL,SOL], mode:'lines',
+      line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
+
+  // ── Green: drop at x_C_GB, then flat at CMX_REQ_SEC ─────────────────────
+  traces.push({ x:[x_C_GB, x_C_GB+DROP], y:[y_C_actual, CMX_REQ_SEC], mode:'lines',
+    line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
+  traces.push({ x:[x_C_GB+DROP, X_MAX], y:[CMX_REQ_SEC, CMX_REQ_SEC], mode:'lines',
+    line:{color:GREEN,width:2.5}, name:'with CMX', hoverinfo:'skip' });
+
+  // ── Blue: continues rising C_eff→D, then flat at SOL ────────────────────
+  if (x_D_GB > x_C_eff) {
+    const xs_s = linspace(x_C_eff, Math.min(x_D_GB, X_MAX), 200);
+    traces.push({ x:xs_s, y:xs_s.map(x=>Math.min(yrise(x),SOL)+dy), mode:'lines',
+      line:{color:BLUE,width:2.5}, showlegend:false, hoverinfo:'skip' });
+  }
+  if (x_D_GB <= X_MAX)
+    traces.push({ x:[x_D_GB, X_MAX], y:[SOL,SOL], mode:'lines',
+      line:{color:BLUE,width:2.5}, name:'infinite HBM-DRAM', hoverinfo:'skip' });
+
+  // ── Black: drops at B to RECOMPUTE, then flat ────────────────────────────
+  traces.push({ x:[x_B_GB, x_B_GB+DROP], y:[y_B, RECOMP], mode:'lines',
+    line:{color:BLACK,width:2.5}, showlegend:false, hoverinfo:'skip' });
+  traces.push({ x:[x_B_GB+DROP, X_MAX], y:[RECOMP,RECOMP], mode:'lines',
+    line:{color:BLACK,width:2.5}, name:'without CMX', hoverinfo:'skip' });
+
+  // ── Reference lines ───────────────────────────────────────────────────────
+  traces.push({ x:[0,X_MAX], y:[RECOMP,RECOMP], mode:'lines',
+    line:{color:BLACK,width:1.5,dash:'dot'}, showlegend:false, hoverinfo:'skip' });
+  traces.push({ x:[0,X_MAX], y:[CMX_REQ_SEC,CMX_REQ_SEC], mode:'lines',
+    line:{color:GREEN,width:1.5,dash:'dot'}, showlegend:false, hoverinfo:'skip' });
+  traces.push({ x:[0,X_MAX], y:[SOL,SOL], mode:'lines',
+    line:{color:BLUE,width:1.8,dash:'dot'}, showlegend:false, hoverinfo:'skip' });
+
+  // ── Vertical dotted lines at key x ───────────────────────────────────────
+  [x_B_GB, x_C_GB].forEach(x =>
+    shapes.push({ type:'line', x0:x,x1:x, y0:0,y1:y_max,
+      line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' }));
+  if (!sol_limited && x_D_GB <= X_MAX * 0.97)
+    shapes.push({ type:'line', x0:x_D_GB,x1:x_D_GB, y0:0,y1:y_max,
+      line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
+
+  // ── Dots at key points ────────────────────────────────────────────────────
+  const pts = [
+    [x_A_GB,  y_A,       '#777'],
+    [x_B_GB,  y_B,       BLACK],
+    [x_C_eff, y_C_actual, BLUE],
+    [x_C_eff, y_B,        '#777'],
+    [x_B_GB,  0,          '#777'],
+  ];
+  if (!sol_limited) pts.push([x_D_GB, SOL, BLUE]);
+  pts.forEach(([x,y,c]) =>
+    traces.push({ x:[x],y:[y], mode:'markers', marker:{color:c,size:9},
+      showlegend:false, hoverinfo:'skip' }));
+
+  // ── Point labels ─────────────────────────────────────────────────────────
+  const lox = X_MAX * 0.012, loy = y_max * 0.035;
+  const lbls = [
+    [x_A_GB - lox*2.5, y_A + loy, 'A'],
+    [x_B_GB - lox*3,   y_B + loy, 'B'],
+    [x_C_eff + lox,    y_C_actual + loy, sol_limited ? 'C,D' : 'C'],
+    [x_C_eff + lox,    y_B + loy, 'E'],
+    [x_B_GB - lox*3,   loy * 0.5, 'G'],
+  ];
+  if (!sol_limited) lbls.push([x_D_GB - lox*3, SOL + loy, 'D']);
+  lbls.forEach(([x,y,t]) =>
+    annotations.push({ x, y, text:`<b>${t}</b>`, showarrow:false,
+      font:{size:13,color:'#777'}, xref:'x', yref:'y' }));
+
+  // ── Reference labels (right edge) ────────────────────────────────────────
+  annotations.push({ x:X_MAX, y:RECOMP+loy*0.6, text:'recompute',
+    showarrow:false, font:{size:10,color:BLACK}, xanchor:'right', xref:'x', yref:'y' });
+  annotations.push({ x:X_MAX, y:CMX_REQ_SEC+loy*0.6, text:'CMX<sub>BW</sub>',
+    showarrow:false, font:{size:10,color:GREEN}, xanchor:'right', xref:'x', yref:'y' });
+  annotations.push({ x:X_MAX, y:SOL+loy*0.6, text:'<b>SOL</b>',
+    showarrow:false, font:{size:10,color:BLUE}, xanchor:'right', xref:'x', yref:'y' });
+
+  // ── Arrows ────────────────────────────────────────────────────────────────
+  // 0→B horizontal (black)
+  annotations.push({ x:x_B_GB, y:0, ax:0, ay:0,
+    xref:'x', yref:'y', axref:'x', ayref:'y',
+    arrowhead:2, arrowside:'both', arrowcolor:BLACK, arrowwidth:2.5,
+    showarrow:true, text:'' });
+  // BG vertical (red)
+  annotations.push({ x:x_B_GB, y:y_B, ax:x_B_GB, ay:0,
+    xref:'x', yref:'y', axref:'x', ayref:'y',
+    arrowhead:2, arrowside:'both', arrowcolor:'#c0392b', arrowwidth:2,
+    showarrow:true, text:'' });
+  // BE horizontal (dark)
+  annotations.push({ x:x_C_eff, y:y_B, ax:x_B_GB, ay:y_B,
+    xref:'x', yref:'y', axref:'x', ayref:'y',
+    arrowhead:2, arrowside:'both', arrowcolor:'#333', arrowwidth:2,
+    showarrow:true, text:'' });
+  // CE vertical (red)
+  annotations.push({ x:x_C_eff, y:y_C_actual, ax:x_C_eff, ay:y_B,
+    xref:'x', yref:'y', axref:'x', ayref:'y',
+    arrowhead:2, arrowside:'both', arrowcolor:'#c0392b', arrowwidth:2.5,
+    showarrow:true, text:'' });
+
+  // ── CMX_BW·T span label (x-axis level) ───────────────────────────────────
+  const span_y = y_max * 0.07;
+  annotations.push({ x:(x_B_GB+x_C_GB)/2, y:span_y + y_max*0.03,
+    text:"CMX<sub>BW</sub> · T<sub>between_steps</sub>  (Little's Law)",
+    showarrow:false, font:{size:10,color:'#555'},
+    xanchor:'center', yanchor:'bottom', xref:'x', yref:'y' });
+  annotations.push({ x:x_C_GB, y:span_y, ax:x_B_GB, ay:span_y,
+    xref:'x', yref:'y', axref:'x', ayref:'y',
+    arrowhead:2, arrowside:'both', arrowcolor:'#555', arrowwidth:1.5,
+    showarrow:true, text:'' });
+
+  // ── Formula box ──────────────────────────────────────────────────────────
+  const box_x = X_MAX * 0.17;
+  const box_y = y_max * 0.72;
+  if (!sol_limited) {
+    annotations.push({ x:box_x, y:box_y, xref:'x', yref:'y',
+      text: `gain_ratio = CE/BG = CMX<sub>BW</sub>·T / HBM-DRAM<br><b>→ ${(gain_ratio*100).toFixed(1)}%</b>`,
+      showarrow:false, font:{size:11,color:'#c0392b'},
+      bgcolor:'#fff0f0', bordercolor:'#c0392b', borderwidth:1.5, borderpad:8,
+      xanchor:'center', yanchor:'middle' });
+  } else {
+    annotations.push({ x:box_x, y:box_y, xref:'x', yref:'y',
+      text: `<b>gain_ratio = CE/BG → ${(gain_actual*100).toFixed(1)}%</b>`,
+      showarrow:false, font:{size:13,color:'#c0392b'},
+      bgcolor:'#fff0f0', bordercolor:'#c0392b', borderwidth:1.5, borderpad:8,
+      xanchor:'center', yanchor:'middle' });
+  }
+
+  // ── X-axis ticks (GB + agents) ────────────────────────────────────────────
+  const n_ticks = 8;
+  const key_xs = new Set([x_A_GB, x_B_GB, x_C_GB]);
+  if (!sol_limited && x_D_GB <= X_MAX * 0.97) key_xs.add(x_D_GB);
+  for (let i = 0; i <= n_ticks; i++) key_xs.add(X_MAX * i / n_ticks);
+  let ticks = Array.from(key_xs).sort((a,b)=>a-b);
+  const min_gap = X_MAX * 0.05;
+  const fticks = [ticks[0]];
+  for (let i = 1; i < ticks.length; i++) {
+    if (ticks[i] - fticks[fticks.length-1] >= min_gap) fticks.push(ticks[i]);
+  }
+
+  const layout = {
+    xaxis: {
+      title: { text:'Capacity', font:{size:12} },
+      range: [0, X_MAX],
+      tickmode:'array',
+      tickvals: fticks,
+      ticktext: fticks.map(x => `${Math.round(x)} GB\n${Math.round(x/AVG)} agents`),
+      tickfont: { size:9 },
+      gridcolor:'#e8e8e8', showgrid:true, zeroline:true
+    },
+    yaxis: {
+      title: { text:'reqs/sec', font:{size:12} },
+      range: [0, y_max],
+      gridcolor:'#e8e8e8', showgrid:true
+    },
+    annotations, shapes,
+    showlegend: true,
+    legend: { x:0.01, y:0.99, xanchor:'left', yanchor:'top', font:{size:10},
+              bgcolor:'rgba(255,255,255,0.8)', bordercolor:'#ccc', borderwidth:1 },
+    plot_bgcolor:'white', paper_bgcolor:'white',
+    margin: { t:50, r:80, b:70, l:65 },
+    height: 560
+  };
+
+  Plotly.react('chart', traces, layout, { responsive:true, displayModeBar:false });
+}
+
+window.onload = generate;
+</script>
+</body>
+</html>
