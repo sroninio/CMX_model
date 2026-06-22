@@ -175,32 +175,22 @@ function generate() {
 
   const traces = [], annotations = [], shapes = [];
 
-  // ── Dotted gray line (0,0) → A ───────────────────────────────────────────
-  traces.push({ x:[0, x_A_GB], y:[0, y_A], mode:'lines',
-    line:{ color:'#888', width:2, dash:'dot' }, showlegend:false, hoverinfo:'skip' });
-
   // ── Helper for rising segment from B ─────────────────────────────────────
   const yrise = x => y_B + slope * (x - x_B_GB);
 
-  // ── Segment 0→A: flat (three lines offset) ───────────────────────────────
-  [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
-    traces.push({ x:[0,x_A_GB], y:[y_A+o,y_A+o], mode:'lines',
-      line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
-
-  // ── Segment A→B: rising (three lines offset) — skipped when hbm_sufficient
-  //    because that branch draws A→D (D≤B) and then flat; drawing A→B first
-  //    would push lines past SOL before the hbm_sufficient overlay.
-  const xs_AB = linspace(x_A_GB, x_B_GB, 200);
-  const ys_AB = xs_AB.map(x => RECOMP + slope*(x - x_A_GB));
+  // ── Segment 0→B: rising from (0,0) — skipped when hbm_sufficient
+  //    (that branch draws 0→D capped at SOL instead)
+  const xs_AB = linspace(0, x_B_GB, 200);
+  const ys_AB = xs_AB.map(x => slope * x);
   if (!hbm_sufficient)
     [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
       traces.push({ x:xs_AB, y:ys_AB.map(y=>y+o), mode:'lines',
         line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
 
   if (hbm_sufficient) {
-    // ── HBM sufficient: all three lines rise together and flatten at SOL ────
-    const xs_AD = linspace(x_A_GB, x_D_GB, 200);
-    const ys_AD = xs_AD.map(x => Math.min(RECOMP + slope*(x - x_A_GB), SOL));
+    // ── HBM sufficient: all three lines rise together from 0 and flatten at SOL
+    const xs_AD = linspace(0, x_D_GB, 200);
+    const ys_AD = xs_AD.map(x => Math.min(slope * x, SOL));
     [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
       traces.push({ x:xs_AD, y:ys_AD.map(y=>y+o), mode:'lines',
         line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
@@ -344,7 +334,7 @@ function generate() {
   for (let v = 0; v <= X_MAX + tick_step; v += tick_step) evenly.push(v);
 
   // Always include key points
-  const must_include = [x_A_GB, x_B_GB, x_C_GB];
+  const must_include = [x_B_GB, x_C_GB];
 
   // Merge: replace nearest evenly-spaced tick with key point if close enough
   const all = new Set(evenly.map(Math.round));
