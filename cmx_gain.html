@@ -187,12 +187,15 @@ function generate() {
     traces.push({ x:[0,x_A_GB], y:[y_A+o,y_A+o], mode:'lines',
       line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
 
-  // ── Segment A→B: rising (three lines offset) ─────────────────────────────
+  // ── Segment A→B: rising (three lines offset) — skipped when hbm_sufficient
+  //    because that branch draws A→D (D≤B) and then flat; drawing A→B first
+  //    would push lines past SOL before the hbm_sufficient overlay.
   const xs_AB = linspace(x_A_GB, x_B_GB, 200);
   const ys_AB = xs_AB.map(x => RECOMP + slope*(x - x_A_GB));
-  [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
-    traces.push({ x:xs_AB, y:ys_AB.map(y=>y+o), mode:'lines',
-      line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
+  if (!hbm_sufficient)
+    [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
+      traces.push({ x:xs_AB, y:ys_AB.map(y=>y+o), mode:'lines',
+        line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
 
   if (hbm_sufficient) {
     // ── HBM sufficient: all three lines rise together and flatten at SOL ────
@@ -257,6 +260,9 @@ function generate() {
     if (!sol_limited && x_D_GB <= X_MAX * 0.97)
       shapes.push({ type:'line', x0:x_D_GB,x1:x_D_GB, y0:0,y1:y_max,
         line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
+  } else {
+    shapes.push({ type:'line', x0:x_B_GB,x1:x_B_GB, y0:0,y1:y_max,
+      line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
   }
 
   // ── Point labels B, C, E, G (only when not hbm_sufficient) ──────────────
@@ -308,6 +314,11 @@ function generate() {
     annotations.push({ x:(x_B_GB+x_C_GB)/2, y: lbl_y, xref:'x', yref:'y',
       text:"CMX<sub>BW</sub> · T<sub>between_steps</sub>  (Little's Law)",
       showarrow:false, font:{size:10,color:'#555'}, xanchor:'center', yanchor:'bottom' });
+  } else {
+    dblArrow(0, span_y, x_B_GB, span_y, '#888', 1.5);
+    annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
+      text: '<b>HBM-DRAM</b>', showarrow:false,
+      font:{size:10, color:'#888'}, xanchor:'center', yanchor:'bottom' });
   }
 
   // ── Formula box ──────────────────────────────────────────────────────────
