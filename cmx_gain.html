@@ -130,10 +130,11 @@ function generate() {
   const y_B = x_B_GB * slope;
   const y_C = x_C_GB * slope;
 
+  const hbm_sufficient = y_B >= SOL;           // all lines hit SOL before spilling
   const x_C_eff      = Math.min(x_C_GB, x_D_GB);
   const y_C_actual   = Math.min(y_C, SOL);
   const sol_limited  = x_C_GB > x_D_GB;
-  const gain_actual  = (y_C_actual - y_B) / y_B;
+  const gain_actual  = hbm_sufficient ? 0 : (y_C_actual - y_B) / y_B;
   const CMX_draw_lvl = Math.min(CMX_REQ_SEC, SOL);  // green never exceeds SOL
 
   // ── Degenerate case checks ───────────────────────────────────────────────
@@ -142,8 +143,6 @@ function generate() {
     errs.push(`RECOMPUTE < CMX_REQ_SEC not satisfied`);
   if (!(y_B > RECOMP))
     errs.push(`Better to recompute than use HBM-DRAM — gain = CMX_REQ_SEC / RECOMPUTE = ${CMX_REQ_SEC.toFixed(2)} / ${RECOMP} = ${(CMX_REQ_SEC/RECOMP).toFixed(2)}x`);
-  if (!(y_B < SOL))
-    errs.push(`HBM-DRAM is sufficient — no CMX needed`);
 
   const eb = document.getElementById('error-box');
   if (errs.length) {
@@ -195,40 +194,52 @@ function generate() {
     traces.push({ x:xs_AB, y:ys_AB.map(y=>y+o), mode:'lines',
       line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
 
-  // ── Segment B→C_eff: blue+green rise (capped at SOL) ────────────────────
-  const xs_BC = linspace(x_B_GB, x_C_eff, 200);
-  const ys_BC = xs_BC.map(x => Math.min(yrise(x), SOL));
-  traces.push({ x:xs_BC, y:ys_BC.map(y=>y+dy), mode:'lines',
-    line:{color:BLUE, width:2.5}, showlegend:false, hoverinfo:'skip' });
-  traces.push({ x:xs_BC, y:ys_BC, mode:'lines',
-    line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
-
-  // ── Green: optional flat at SOL from C_eff → C_GB (sol_limited) ──────────
-  if (sol_limited)
-    traces.push({ x:[x_C_eff,x_C_GB], y:[SOL,SOL], mode:'lines',
+  if (hbm_sufficient) {
+    // ── HBM sufficient: all three lines rise together and flatten at SOL ────
+    const xs_AD = linspace(x_A_GB, x_D_GB, 200);
+    const ys_AD = xs_AD.map(x => Math.min(RECOMP + slope*(x - x_A_GB), SOL));
+    [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
+      traces.push({ x:xs_AD, y:ys_AD.map(y=>y+o), mode:'lines',
+        line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
+    [[BLUE,+dy,'infinite HBM-DRAM'],[GREEN,0,'with CMX'],[BLACK,-dy,'without CMX']].forEach(([c,o,n]) =>
+      traces.push({ x:[x_D_GB, X_MAX], y:[SOL+o, SOL+o], mode:'lines',
+        line:{color:c,width:2.5}, name:n, hoverinfo:'skip' }));
+  } else {
+    // ── Segment B→C_eff: blue+green rise (capped at SOL) ──────────────────
+    const xs_BC = linspace(x_B_GB, x_C_eff, 200);
+    const ys_BC = xs_BC.map(x => Math.min(yrise(x), SOL));
+    traces.push({ x:xs_BC, y:ys_BC.map(y=>y+dy), mode:'lines',
+      line:{color:BLUE, width:2.5}, showlegend:false, hoverinfo:'skip' });
+    traces.push({ x:xs_BC, y:ys_BC, mode:'lines',
       line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
 
-  // ── Green: drop at x_C_GB, then flat at CMX_REQ_SEC ─────────────────────
-  traces.push({ x:[x_C_GB, x_C_GB+DROP], y:[y_C_actual, CMX_draw_lvl], mode:'lines',
-    line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
-  traces.push({ x:[x_C_GB+DROP, X_MAX], y:[CMX_draw_lvl, CMX_draw_lvl], mode:'lines',
-    line:{color:GREEN,width:2.5}, name:'with CMX', hoverinfo:'skip' });
+    // ── Green: optional flat at SOL from C_eff → C_GB (sol_limited) ────────
+    if (sol_limited)
+      traces.push({ x:[x_C_eff,x_C_GB], y:[SOL,SOL], mode:'lines',
+        line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
 
-  // ── Blue: continues rising C_eff→D, then flat at SOL ────────────────────
-  if (x_D_GB > x_C_eff) {
-    const xs_s = linspace(x_C_eff, Math.min(x_D_GB, X_MAX), 200);
-    traces.push({ x:xs_s, y:xs_s.map(x=>Math.min(yrise(x),SOL)+dy), mode:'lines',
-      line:{color:BLUE,width:2.5}, showlegend:false, hoverinfo:'skip' });
+    // ── Green: drop at x_C_GB, then flat at CMX_draw_lvl ───────────────────
+    traces.push({ x:[x_C_GB, x_C_GB+DROP], y:[y_C_actual, CMX_draw_lvl], mode:'lines',
+      line:{color:GREEN,width:2.5}, showlegend:false, hoverinfo:'skip' });
+    traces.push({ x:[x_C_GB+DROP, X_MAX], y:[CMX_draw_lvl, CMX_draw_lvl], mode:'lines',
+      line:{color:GREEN,width:2.5}, name:'with CMX', hoverinfo:'skip' });
+
+    // ── Blue: continues rising C_eff→D, then flat at SOL ───────────────────
+    if (x_D_GB > x_C_eff) {
+      const xs_s = linspace(x_C_eff, Math.min(x_D_GB, X_MAX), 200);
+      traces.push({ x:xs_s, y:xs_s.map(x=>Math.min(yrise(x),SOL)+dy), mode:'lines',
+        line:{color:BLUE,width:2.5}, showlegend:false, hoverinfo:'skip' });
+    }
+    if (x_D_GB <= X_MAX)
+      traces.push({ x:[x_D_GB, X_MAX], y:[SOL+dy, SOL+dy], mode:'lines',
+        line:{color:BLUE,width:2.5}, name:'infinite HBM-DRAM', hoverinfo:'skip' });
+
+    // ── Black: drops at B to RECOMPUTE, then flat ──────────────────────────
+    traces.push({ x:[x_B_GB, x_B_GB+DROP], y:[y_B, RECOMP], mode:'lines',
+      line:{color:BLACK,width:2.5}, showlegend:false, hoverinfo:'skip' });
+    traces.push({ x:[x_B_GB+DROP, X_MAX], y:[RECOMP,RECOMP], mode:'lines',
+      line:{color:BLACK,width:2.5}, name:'without CMX', hoverinfo:'skip' });
   }
-  if (x_D_GB <= X_MAX)
-    traces.push({ x:[x_D_GB, X_MAX], y:[SOL+dy, SOL+dy], mode:'lines',
-      line:{color:BLUE,width:2.5}, name:'infinite HBM-DRAM', hoverinfo:'skip' });
-
-  // ── Black: drops at B to RECOMPUTE, then flat ────────────────────────────
-  traces.push({ x:[x_B_GB, x_B_GB+DROP], y:[y_B, RECOMP], mode:'lines',
-    line:{color:BLACK,width:2.5}, showlegend:false, hoverinfo:'skip' });
-  traces.push({ x:[x_B_GB+DROP, X_MAX], y:[RECOMP,RECOMP], mode:'lines',
-    line:{color:BLACK,width:2.5}, name:'without CMX', hoverinfo:'skip' });
 
   // ── Reference lines ───────────────────────────────────────────────────────
   traces.push({ x:[0,X_MAX], y:[RECOMP,RECOMP], mode:'lines',
@@ -239,18 +250,18 @@ function generate() {
     line:{color:BLUE,width:1.8,dash:'dot'}, showlegend:false, hoverinfo:'skip' });
 
   // ── Vertical dotted lines at key x ───────────────────────────────────────
-  [x_B_GB, x_C_GB].forEach(x =>
-    shapes.push({ type:'line', x0:x,x1:x, y0:0,y1:y_max,
-      line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' }));
-  if (!sol_limited && x_D_GB <= X_MAX * 0.97)
-    shapes.push({ type:'line', x0:x_D_GB,x1:x_D_GB, y0:0,y1:y_max,
-      line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
+  if (!hbm_sufficient) {
+    [x_B_GB, x_C_GB].forEach(x =>
+      shapes.push({ type:'line', x0:x,x1:x, y0:0,y1:y_max,
+        line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' }));
+    if (!sol_limited && x_D_GB <= X_MAX * 0.97)
+      shapes.push({ type:'line', x0:x_D_GB,x1:x_D_GB, y0:0,y1:y_max,
+        line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
+  }
 
-  // ── Dots at key points ────────────────────────────────────────────────────
-
-  // ── Point labels B, C, E, G ──────────────────────────────────────────────
+  // ── Point labels B, C, E, G (only when not hbm_sufficient) ──────────────
   const lox = X_MAX * 0.012, loy = y_max * 0.035;
-  const lbls = [
+  const lbls = hbm_sufficient ? [] : [
     [x_B_GB - lox*3,   y_B + loy,        'B'],
     [x_C_eff + lox,    y_C_actual + loy,  'C'],
     [x_C_eff + lox,    y_B + loy,         'E'],
@@ -274,38 +285,39 @@ function generate() {
     annotations.push({ ...base, x:x1, y:y1, ax:x2, ay:y2, arrowcolor:color, arrowwidth:width });
   }
 
-  // ── Arrows ────────────────────────────────────────────────────────────────
-  dblArrow(0,      0,    x_B_GB,    0,       BLACK,      2.5);  // 0→B horizontal
-  dblArrow(x_B_GB, 0,    x_B_GB,    y_B,     '#c0392b',  2.0);  // BG vertical
-  dblArrow(x_B_GB, y_B,  x_C_eff,   y_B,     '#333',     2.0);  // BE horizontal
-  dblArrow(x_C_eff,y_B,  x_C_eff,   y_C_actual,'#c0392b',2.5);  // CE vertical
+  // ── Arrows (only when spill point exists) ────────────────────────────────
+  if (!hbm_sufficient) {
+    dblArrow(0,      0,    x_B_GB,    0,       BLACK,      2.5);  // 0→B horizontal
+    dblArrow(x_B_GB, 0,    x_B_GB,    y_B,     '#c0392b',  2.0);  // BG vertical
+    dblArrow(x_B_GB, y_B,  x_C_eff,   y_B,     '#333',     2.0);  // BE horizontal
+    dblArrow(x_C_eff,y_B,  x_C_eff,   y_C_actual,'#c0392b',2.5);  // CE vertical
+  }
 
-  // ── HBM-DRAM and CMX_BW·T span labels (top of chart) ────────────────────
+  // ── HBM-DRAM and CMX_BW·T span labels + formula box ─────────────────────
   const span_y = y_max * 0.93;
   const lbl_y  = span_y + y_max * 0.03;
+  const box_x  = X_MAX * 0.17;
+  const box_y  = y_max * 0.72;
 
-  // HBM-DRAM span (0 → B)
-  dblArrow(0, span_y, x_B_GB, span_y, '#888', 1.5);
-  annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
-    text: '<b>HBM-DRAM</b>', showarrow:false,
-    font:{size:10, color:'#888'}, xanchor:'center', yanchor:'bottom' });
-
-  // CMX_BW·T span (B → C)
-  dblArrow(x_B_GB, span_y, x_C_GB, span_y, '#555', 1.5);
-  annotations.push({ x:(x_B_GB+x_C_GB)/2, y: lbl_y, xref:'x', yref:'y',
-    text:"CMX<sub>BW</sub> · T<sub>between_steps</sub>  (Little's Law)",
-    showarrow:false, font:{size:10,color:'#555'}, xanchor:'center', yanchor:'bottom' });
+  if (!hbm_sufficient) {
+    dblArrow(0, span_y, x_B_GB, span_y, '#888', 1.5);
+    annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
+      text: '<b>HBM-DRAM</b>', showarrow:false,
+      font:{size:10, color:'#888'}, xanchor:'center', yanchor:'bottom' });
+    dblArrow(x_B_GB, span_y, x_C_GB, span_y, '#555', 1.5);
+    annotations.push({ x:(x_B_GB+x_C_GB)/2, y: lbl_y, xref:'x', yref:'y',
+      text:"CMX<sub>BW</sub> · T<sub>between_steps</sub>  (Little's Law)",
+      showarrow:false, font:{size:10,color:'#555'}, xanchor:'center', yanchor:'bottom' });
+  }
 
   // ── Formula box ──────────────────────────────────────────────────────────
-  const box_x = X_MAX * 0.17;
-  const box_y = y_max * 0.72;
-  if (!sol_limited) {
+  if (!hbm_sufficient && !sol_limited) {
     annotations.push({ x:box_x, y:box_y, xref:'x', yref:'y',
       text: `gain_ratio = CE/BG = CMX<sub>BW</sub>·T / HBM-DRAM<br><b>→ ${(gain_ratio*100).toFixed(1)}%</b>`,
       showarrow:false, font:{size:11,color:'#c0392b'},
       bgcolor:'#fff0f0', bordercolor:'#c0392b', borderwidth:1.5, borderpad:8,
       xanchor:'center', yanchor:'middle' });
-  } else {
+  } else if (!hbm_sufficient && sol_limited) {
     annotations.push({ x:box_x, y:box_y, xref:'x', yref:'y',
       text: `<b>gain_ratio = CE/BG → ${(gain_actual*100).toFixed(1)}%</b>`,
       showarrow:false, font:{size:13,color:'#c0392b'},
