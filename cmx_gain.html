@@ -478,7 +478,7 @@ function generate() {
   const x2max = slope * 1.3;
   const layout2 = {
     title: { text: 'CMX Gain — Efficiency View', font:{size:16,family:'serif'} },
-    xaxis: { title:{ text:'<b>throughput / concurrency  (reqs/sec per GB)</b>', font:{size:12} },
+    xaxis: { title:{ text:'<b>reqs/sec/user</b>', font:{size:12} },
              range:[0, x2max], gridcolor:'#e8e8e8', showgrid:true, tickangle:0 },
     yaxis: { title:{ text:'<b>reqs/sec</b>', font:{size:12} },
              range:[0, y_max], gridcolor:'#e8e8e8', showgrid:true },
