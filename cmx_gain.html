@@ -162,10 +162,10 @@ function generate() {
   // ── Stats bar ────────────────────────────────────────────────────────────
   const statsEl = document.getElementById('stats');
   statsEl.style.display = 'grid';
-  const cmx_used = sol_limited ? (x_D_GB - x_B_GB) : CMX_T_GB;
+  const cmx_used = hbm_sufficient ? 0 : sol_limited ? (x_D_GB - x_B_GB) : CMX_T_GB;
   document.getElementById('s-cmxt').textContent   = cmx_used.toFixed(1) + ' GB';
   document.getElementById('s-with').textContent   = y_C_actual.toFixed(2) + ' reqs/s';
-  document.getElementById('s-without').textContent = (hbm_small ? RECOMP : y_B).toFixed(2) + ' reqs/s';
+  document.getElementById('s-without').textContent = (hbm_sufficient ? SOL : hbm_small ? RECOMP : y_B).toFixed(2) + ' reqs/s';
   document.getElementById('s-gain').textContent   = (gain_actual * 100).toFixed(1) + '%';
 
   // ── Layout constants ─────────────────────────────────────────────────────
@@ -475,6 +475,37 @@ function generate() {
     mkTrace2(yBlack, BLACK, 'without CMX'),
   ];
 
+  // ── Pareto-optimal marker: rightmost among near-max-Y points ───────────────
+  const ann2 = [];
+  // stagger arrow offsets so overlapping markers stay readable
+  const paretoOffsets = [
+    { ax:-50, ay:-50, xanchor:'right' },  // BLUE
+    { ax: 30, ay:-25, xanchor:'left'  },  // GREEN
+    { ax: 30, ay:  5, xanchor:'left'  },  // BLACK
+  ];
+  traces2.forEach((t, idx) => {
+    if (idx >= 3) return;  // only the original 3 traces
+    const maxY = Math.max(...t.y);
+    // consider all points within 1% of max Y, pick the rightmost X among them
+    let bestI = 0;
+    for (let i = 1; i < t.y.length; i++) {
+      const nearMax = t.y[i] >= maxY * 0.99;
+      const prevNearMax = t.y[bestI] >= maxY * 0.99;
+      if ((nearMax && !prevNearMax) ||
+          (nearMax && prevNearMax && t.x[i] > t.x[bestI]))
+        bestI = i;
+    }
+    const px = t.x[bestI], py = t.y[bestI], col = t.marker.color;
+    const off = paretoOffsets[idx];
+    traces2.push({ x:[px], y:[py], mode:'markers',
+      marker:{ color:col, size:10, symbol:'circle' },
+      showlegend:false, hoverinfo:'skip' });
+    ann2.push({ x:px, y:py, text:`<b style="color:${col}">Pareto optimal</b>`,
+      showarrow:true, arrowhead:2, arrowcolor:col, arrowwidth:1.5,
+      ax:off.ax, ay:off.ay, font:{size:10, color:col},
+      xref:'x', yref:'y', xanchor:off.xanchor });
+  });
+
   const x2max = slope * 1.3;
   const layout2 = {
     title: { text: 'CMX Gain — Efficiency View', font:{size:16,family:'serif'} },
@@ -482,11 +513,12 @@ function generate() {
              range:[0, x2max], gridcolor:'#e8e8e8', showgrid:true, tickangle:0 },
     yaxis: { title:{ text:'<b>reqs/sec</b>', font:{size:12} },
              range:[0, y_max], gridcolor:'#e8e8e8', showgrid:true },
+    annotations: ann2,
     showlegend:true,
-    legend:{ x:0.99, y:1.08, xanchor:'right', yanchor:'top', font:{size:10},
+    legend:{ x:1.02, y:0.99, xanchor:'left', yanchor:'top', font:{size:10},
              bgcolor:'rgba(255,255,255,0.8)', bordercolor:'#ccc', borderwidth:1 },
     plot_bgcolor:'white', paper_bgcolor:'white',
-    margin:{ t:50, r:80, b:80, l:65 },
+    margin:{ t:50, r:160, b:80, l:65 },
     height: 500
   };
   Plotly.react('chart2', traces2, layout2, { responsive:true, displayModeBar:false });
