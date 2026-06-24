@@ -204,7 +204,7 @@ function generate() {
     [[BLUE,+dy],[GREEN,0],[BLACK,-dy]].forEach(([c,o]) =>
       traces.push({ x:xs_AD, y:ys_AD.map(y=>y+o), mode:'lines',
         line:{color:c,width:2.5}, showlegend:false, hoverinfo:'skip' }));
-    [[BLUE,+dy,'infinite HBM-DRAM'],[GREEN,0,'with CMX'],[BLACK,-dy,'without CMX']].forEach(([c,o,n]) =>
+    [[BLUE,+dy,'infinite HBM+DRAM'],[GREEN,0,'with CMX'],[BLACK,-dy,'without CMX']].forEach(([c,o,n]) =>
       traces.push({ x:[x_D_GB, X_MAX], y:[SOL+o, SOL+o], mode:'lines',
         line:{color:c,width:2.5}, name:n, hoverinfo:'skip' }));
 
@@ -234,7 +234,7 @@ function generate() {
     }
     if (x_D_GB <= X_MAX)
       traces.push({ x:[x_D_GB, X_MAX], y:[SOL+dy, SOL+dy], mode:'lines',
-        line:{color:BLUE,width:2.5}, name:'infinite HBM-DRAM', hoverinfo:'skip' });
+        line:{color:BLUE,width:2.5}, name:'infinite HBM+DRAM', hoverinfo:'skip' });
 
     // black: flat at RECOMP from x_A onwards (no drop needed)
     traces.push({ x:[x_A_GB, X_MAX], y:[RECOMP-dy, RECOMP-dy], mode:'lines',
@@ -265,7 +265,7 @@ function generate() {
     }
     if (x_D_GB <= X_MAX)
       traces.push({ x:[x_D_GB, X_MAX], y:[SOL+dy, SOL+dy], mode:'lines',
-        line:{color:BLUE,width:2.5}, name:'infinite HBM-DRAM', hoverinfo:'skip' });
+        line:{color:BLUE,width:2.5}, name:'infinite HBM+DRAM', hoverinfo:'skip' });
 
     traces.push({ x:[x_B_GB, x_B_GB+DROP], y:[y_B, RECOMP], mode:'lines',
       line:{color:BLACK,width:2.5}, showlegend:false, hoverinfo:'skip' });
@@ -329,10 +329,12 @@ function generate() {
   }
 
   // ── Reference labels (right edge) ────────────────────────────────────────
-  annotations.push({ x:X_MAX, y:RECOMP+loy*0.6, text:'recompute',
+  annotations.push({ x:X_MAX*0.6, y:RECOMP+loy*0.6, text:'recompute',
     showarrow:false, font:{size:10,color:BLACK}, xanchor:'right', xref:'x', yref:'y' });
-  annotations.push({ x:X_MAX, y:CMX_REQ_SEC+loy*0.6, text:'CMX<sub>BW</sub>',
+  annotations.push({ x:X_MAX*0.6, y:CMX_REQ_SEC+loy*0.6, text:'CMX<sub>BW</sub>',
     showarrow:false, font:{size:10,color:GREEN}, xanchor:'right', xref:'x', yref:'y' });
+  annotations.push({ x:X_MAX*0.6, y:SOL+loy*1.4, text:'<b>SOL</b>',
+    showarrow:false, font:{size:10,color:BLUE}, xanchor:'right', xref:'x', yref:'y' });
 
   // ── Helper: double-headed arrow as two annotations ───────────────────────
   function dblArrow(x1, y1, x2, y2, color, width) {
@@ -350,7 +352,7 @@ function generate() {
     dblArrow(x_C_eff,div_y,  x_C_eff, y_C_actual,'#c0392b',2.5);  // CE vertical
   }
 
-  // ── HBM-DRAM and CMX_BW·T span labels + formula box ─────────────────────
+  // ── HBM+DRAM and CMX_BW·T span labels + formula box ─────────────────────
   const span_y = y_max * 0.93;
   const lbl_y  = span_y + y_max * 0.03;
   const box_x  = X_MAX * 0.17;
@@ -359,7 +361,7 @@ function generate() {
   if (!hbm_sufficient) {
     dblArrow(0, span_y, x_B_GB, span_y, '#555', 1.5);
     annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
-      text: '<b>HBM-DRAM</b>', showarrow:false,
+      text: '<b>HBM+DRAM</b>', showarrow:false,
       font:{size:10, color:'#555'}, xanchor:'center', yanchor:'bottom' });
     dblArrow(x_B_GB, span_y, x_C_GB, span_y, '#555', 1.5);
     annotations.push({ x:(x_B_GB+x_C_GB)/2, y: lbl_y, xref:'x', yref:'y',
@@ -368,7 +370,7 @@ function generate() {
   } else {
     dblArrow(0, span_y, x_B_GB, span_y, '#555', 1.5);
     annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
-      text: '<b>HBM-DRAM</b>', showarrow:false,
+      text: '<b>HBM+DRAM</b>', showarrow:false,
       font:{size:10, color:'#555'}, xanchor:'center', yanchor:'bottom' });
   }
 
@@ -384,7 +386,7 @@ function generate() {
     fb.innerHTML = `<b>gain_ratio = CE/BG → ${(gain_actual*100).toFixed(1)}%</b>`;
   } else {
     fb.style.display = 'block';
-    fb.innerHTML = `gain_ratio = CE/BG = CMX<sub>BW</sub>·T / HBM-DRAM<br><b>→ ${(gain_ratio*100).toFixed(1)}%</b>`;
+    fb.innerHTML = `gain_ratio = CE/BG = CMX<sub>BW</sub>·T / HBM+DRAM<br><b>→ ${(gain_ratio*100).toFixed(1)}%</b>`;
   }
 
   // ── X-axis ticks (GB + agents) ────────────────────────────────────────────
@@ -434,16 +436,18 @@ function generate() {
       ticktext: fticks.map(x => `${Math.round(x)} GB`),
       tickfont: { size:9 },
       tickangle: 0,
+      showticklabels: false,
       gridcolor:'#e8e8e8', showgrid:true, zeroline:true
     },
     yaxis: {
       title: { text:'<b>reqs/sec</b>', font:{size:12} },
       range: [0, y_max],
-      gridcolor:'#e8e8e8', showgrid:true
+      gridcolor:'#e8e8e8', showgrid:true,
+      showticklabels: false
     },
     annotations, shapes,
     showlegend: true,
-    legend: { x:0.99, y:1.08, xanchor:'right', yanchor:'top', font:{size:10},
+    legend: { x:0.01, y:1.08, xanchor:'left', yanchor:'top', font:{size:10},
               bgcolor:'rgba(255,255,255,0.8)', bordercolor:'#ccc', borderwidth:1 },
     plot_bgcolor:'white', paper_bgcolor:'white',
     margin: { t:50, r:80, b:80, l:65 },
@@ -473,7 +477,7 @@ function generate() {
   };
 
   const traces2 = [
-    mkTrace2(yBlue,  BLUE,  'infinite HBM-DRAM'),
+    mkTrace2(yBlue,  BLUE,  'infinite HBM+DRAM'),
     mkTrace2(yGreen, GREEN, 'with CMX'),
     mkTrace2(yBlack, BLACK, 'without CMX'),
   ];
