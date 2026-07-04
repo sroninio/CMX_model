@@ -126,6 +126,7 @@
   <div style="font-size:11px;color:#888;margin-top:4px;font-style:italic">John Little (Little's Law)</div>
   <div id="formula-box" style="display:none;background:#fff0f0;border:1.5px solid #c0392b;border-radius:8px;padding:8px 14px;font-size:12px;color:#c0392b;line-height:1.6;display:inline-block;margin-top:8px;"></div>
 </div>
+  <div id="distances-box" style="display:none;background:#f0f4ff;border:1.5px solid #4A90D9;border-radius:8px;padding:8px 16px;font-size:12px;color:#222;line-height:1.8;margin-bottom:12px;"></div>
   <div id="error-box">
     <h3>&#9888; DEGENERATE CASE</h3>
     <p id="error-msg"></p>
@@ -139,10 +140,23 @@
   </div>
 
   <div id="chart"></div>
-  <div id="chart2" style="margin-top:16px;background:white;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.1);"></div>
+  <!-- <div id="chart2" style="margin-top:16px;background:white;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.1);"></div> -->
 </div>
 
 <script>
+function curlBracePath(x1, x2, y, h) {
+  const xm = (x1 + x2) / 2;
+  const w  = x2 - x1;
+  const q  = w * 0.12;
+  return `M ${x1},${y} ` +
+    `C ${x1},${y+h*0.5} ${x1},${y+h*0.5} ${x1+q},${y+h*0.5} ` +
+    `L ${xm-q},${y+h*0.5} ` +
+    `C ${xm},${y+h*0.5} ${xm},${y+h} ${xm},${y+h} ` +
+    `C ${xm},${y+h} ${xm},${y+h*0.5} ${xm+q},${y+h*0.5} ` +
+    `L ${x2-q},${y+h*0.5} ` +
+    `C ${x2},${y+h*0.5} ${x2},${y+h*0.5} ${x2},${y}`;
+}
+
 function showError(msg) {
   const eb = document.getElementById('error-box');
   eb.style.display = 'block';
@@ -150,6 +164,7 @@ function showError(msg) {
   document.getElementById('stats').style.display = 'none';
   Plotly.purge('chart');
   document.getElementById('formula-box').style.display = 'none';
+  document.getElementById('distances-box').style.display = 'none';
 }
 
 function addHistRow() {
@@ -516,9 +531,9 @@ function generate() {
     [x_B_GB, x_C_GB].forEach(x =>
       shapes.push({ type:'line', x0:x,x1:x, y0:0,y1:y_max,
         line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' }));
-    if (!sol_limited && x_D_GB <= X_MAX * 0.97)
+    if (x_D_GB <= X_MAX * 0.97)
       shapes.push({ type:'line', x0:x_D_GB,x1:x_D_GB, y0:0,y1:y_max,
-        line:{color:'#aaa',width:1.5,dash:'dot'}, xref:'x', yref:'y' });
+        line:{color:BLUE,width:1.5,dash:'dot'}, xref:'x', yref:'y' });
   }
 
   // ── Vertical line for ratio-bound CMX capacity ───────────────────────────
@@ -526,22 +541,29 @@ function generate() {
   if (x_ratio_bound <= X_MAX * 0.99) {
     shapes.push({ type:'line', x0:x_ratio_bound, x1:x_ratio_bound, y0:0, y1:y_max,
       line:{color:'#e67e22', width:1.5, dash:'dashdot'}, xref:'x', yref:'y' });
-    annotations.push({ x:x_ratio_bound, y:0, xref:'x', yref:'y',
-      text:'<b>CMX<br>RATIO<br>BOUND</b>', showarrow:false,
-      font:{size:10, color:'#e67e22'}, xanchor:'center', yanchor:'top', yshift:-18 });
   }
 
-  // ── X-axis labels: HBM (at B) and CMX HW BOUND (at Little's Law) ─────────
-  annotations.push({ x:x_B_GB, y:0, xref:'x', yref:'y',
-    text:'<b>HBM</b>', showarrow:false,
-    font:{size:10, color:'#444'}, xanchor:'center', yanchor:'top', yshift:-18 });
+  // ── X-axis labels: H, R, L, S ────────────────────────────────────────────
   const x_hw_bound = x_B_GB + CMX_T_GB;
   if (x_hw_bound <= X_MAX * 0.99) {
     shapes.push({ type:'line', x0:x_hw_bound, x1:x_hw_bound, y0:0, y1:y_max,
       line:{color:'#555', width:1.5, dash:'dashdot'}, xref:'x', yref:'y' });
+  }
+  // H at HBM (B)
+  annotations.push({ x:x_B_GB, y:0, xref:'x', yref:'y',
+    text:'<b>H</b>', showarrow:false,
+    font:{size:12, color:'#444'}, xanchor:'center', yanchor:'top', yshift:-6 });
+  // R at ratio bound
+  if (x_ratio_bound <= X_MAX * 0.99) {
+    annotations.push({ x:x_ratio_bound, y:0, xref:'x', yref:'y',
+      text:'<b>R</b>', showarrow:false,
+      font:{size:12, color:'#e67e22'}, xanchor:'center', yanchor:'top', yshift:-6 });
+  }
+  // L at HW bound (Little's Law)
+  if (x_hw_bound <= X_MAX * 0.99) {
     annotations.push({ x:x_hw_bound, y:0, xref:'x', yref:'y',
-      text:'<b>CMX<br>HW<br>BOUND</b>', showarrow:false,
-      font:{size:10, color:'#444'}, xanchor:'center', yanchor:'top', yshift:-18 });
+      text:'<b>L</b>', showarrow:false,
+      font:{size:12, color:'#444'}, xanchor:'center', yanchor:'top', yshift:-6 });
   }
 
   // ── Point labels B, C, E, G ──────────────────────────────────────────────
@@ -553,7 +575,6 @@ function generate() {
     [div_x - lox*3,  div_y + loy,       'B'],
     [x_C_eff + lox*1.5,  y_C_actual - loy,  'C'],
     [x_C_eff + lox,  div_y + loy,       'E'],
-    [div_x - lox*3,  loy * 0.5,         'G'],
   ];
   lbls.forEach(([x,y,t]) =>
     annotations.push({ x, y, text:`<b>${t}</b>`, showarrow:false,
@@ -565,16 +586,12 @@ function generate() {
       [div_x,   div_y,       '#777'],  // B
       [x_C_eff, y_C_actual,  '#777'],  // C
       [x_C_eff, div_y,       '#777'],  // E
-      [div_x,   0,           '#777'],  // G
     ];
-    // S: where blue line meets SOL
-    if (!hbm_sufficient && x_D_GB <= X_MAX) {
-      traces.push({ x:[x_D_GB], y:[SOL], mode:'markers',
-        marker:{ color:BLUE, size:10, symbol:'circle', line:{color:'#1a5a9a',width:2} },
-        showlegend:false, hoverinfo:'skip' });
-      annotations.push({ x:x_D_GB, y:SOL, ax:0, ay:-22,
-        text:'<b>S</b>', showarrow:true, arrowcolor:BLUE, arrowwidth:1.5,
-        font:{size:13, color:BLUE}, xref:'x', yref:'y' });
+    // S on X axis
+    if (x_D_GB <= X_MAX) {
+      annotations.push({ x:x_D_GB, y:0, xref:'x', yref:'y',
+        text:'<b>S</b>', showarrow:false,
+        font:{size:12, color:BLUE}, xanchor:'center', yanchor:'top', yshift:-6 });
     }
     pts.forEach(([px, py, col]) =>
       traces.push({ x:[px], y:[py], mode:'markers',
@@ -583,11 +600,11 @@ function generate() {
   }
 
   // ── Reference labels (Y axis) ────────────────────────────────────────────
-  annotations.push({ x:-0.01, y:RECOMP, text:'<b>recompute</b>',
+  annotations.push({ x:-0.04, y:RECOMP, text:'<b>recompute</b>',
     showarrow:false, font:{size:11,color:BLACK}, xanchor:'right', xref:'paper', yref:'y' });
-  annotations.push({ x:-0.01, y:CMX_REQ_SEC, text:'<b>CMX<sub>BW</sub></b>',
+  annotations.push({ x:-0.04, y:CMX_REQ_SEC, text:'<b>CMX<sub>BW</sub></b>',
     showarrow:false, font:{size:11,color:GREEN}, xanchor:'right', xref:'paper', yref:'y' });
-  annotations.push({ x:-0.01, y:SOL, text:'<b>SOL</b>',
+  annotations.push({ x:-0.04, y:SOL, text:'<b>SOL</b>',
     showarrow:false, font:{size:11,color:BLUE}, xanchor:'right', xref:'paper', yref:'y' });
 
   // ── Helper: double-headed arrow as two annotations ───────────────────────
@@ -601,8 +618,8 @@ function generate() {
   // ── Arrows (only when spill point exists) ────────────────────────────────
   if (!hbm_sufficient) {
     dblArrow(0,      0,      div_x,   0,       BLACK,      2.5);  // 0→B horizontal
-    dblArrow(div_x,  0,      div_x,   div_y,   '#c0392b',  2.0);  // BG vertical
-    dblArrow(div_x,  div_y,  x_C_GB, div_y, '#333', 2.0);  // BE horizontal (to C)
+    dblArrow(div_x,  0,      div_x,   div_y,   '#c0392b',  2.0);  // BH vertical
+    dblArrow(div_x,  div_y,  x_C_eff, div_y, '#333', 2.0);  // BE horizontal (to E)
     dblArrow(x_C_eff,div_y,  x_C_eff, y_C_actual,'#c0392b',2.5);  // CE vertical
   }
 
@@ -614,29 +631,20 @@ function generate() {
   const box_x  = X_MAX * 0.17;
   const box_y  = y_max * 0.72;
 
-  if (!hbm_sufficient) {
-    dblArrow(0, span_y, x_B_GB, span_y, '#555', 1.5);
-    annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
-      text: '<b>HBM+DRAM</b>', showarrow:false,
-      font:{size:10, color:'#555'}, xanchor:'center', yanchor:'bottom' });
-    dblArrow(x_B_GB, span_y, x_B_GB + CMX_T_GB, span_y, '#555', 1.5);
-    annotations.push({ x:(x_B_GB + x_B_GB + CMX_T_GB)/2, y: lbl_y, xref:'x', yref:'y',
-      text:"<b>CMX<sub>BW</sub> · CMX_Ttools_avg  (Little's Law)</b>",
-      showarrow:false, font:{size:10,color:'#555'}, xanchor:'center', yanchor:'bottom' });
-  } else {
-    dblArrow(0, span_y, x_B_GB, span_y, '#555', 1.5);
-    annotations.push({ x: x_B_GB/2, y: lbl_y, xref:'x', yref:'y',
-      text: '<b>HBM+DRAM</b>', showarrow:false,
-      font:{size:10, color:'#555'}, xanchor:'center', yanchor:'bottom' });
-  }
 
-  // ── 0→S span: SOL * AVG * T ──────────────────────────────────────────────
-  if (!hbm_sufficient && x_D_GB <= X_MAX) {
-    dblArrow(0, span_y2, x_D_GB, span_y2, BLUE, 1.5);
-    annotations.push({ x: x_D_GB/2, y: lbl_y2, xref:'x', yref:'y',
-      text: '<b>SOL · AVG_AGENT_SIZE · total_Ttools_avg</b>',
-      showarrow:false, font:{size:10, color:BLUE}, xanchor:'center', yanchor:'bottom' });
-  }
+
+
+
+
+
+  // ── Distances box ────────────────────────────────────────────────────────
+  const db = document.getElementById('distances-box');
+  db.style.display = 'inline-block';
+  db.innerHTML =
+    `<b>0 ↔ H</b> = HBM = <b>${x_B_GB.toFixed(1)} GB</b><br>` +
+    `<b>0 ↔ S</b> = SOL × AVG × total_Ttools_avg = <b>${x_D_GB.toFixed(1)} GB</b> <span style="color:#888">(SOL capacity bound)</span><br>` +
+    `<b>H ↔ R</b> = HBM × ratio / (1−ratio) = <b>${CMX_cap_ratio.toFixed(1)} GB</b> <span style="color:#888">(CMX ratio capacity bound)</span><br>` +
+    `<b>H ↔ L</b> = CMX<sub>BW</sub> × CMX_Ttools_avg = <b>${CMX_T_GB.toFixed(1)} GB</b> <span style="color:#888">(CMX BW bound, Little's law)</span>`;
 
   // ── Formula box (HTML element near John Little) ─────────────────────────
   const fb = document.getElementById('formula-box');
@@ -652,18 +660,18 @@ function generate() {
     fb.style.borderColor = '';
     fb.style.background = '';
     let gainMsg = '';
-    if (CMX_cap_ratio < CMX_T_GB) {
+    if (CMX_cap_ratio < CMX_T_GB && !sol_limited) {
       gainMsg = `<br><span style="color:#e67e22"><b>Not optimal</b> — consider moving more data to CMX</span>`;
     }
     if (hbm_small && !sol_limited) {
       fb.style.display = 'block';
-      fb.innerHTML = `gain_ratio = CE/BG = (y<sub>C</sub> − RECOMP) / RECOMP<br><b>→ ${(gain_actual*100).toFixed(1)}%</b>${gainMsg}`;
+      fb.innerHTML = `gain_ratio = CE/BH = (y<sub>C</sub> − RECOMP) / RECOMP<br><b>→ ${(gain_actual*100).toFixed(1)}%</b>${gainMsg}`;
     } else if (sol_limited) {
       fb.style.display = 'block';
-      fb.innerHTML = `<b>gain_ratio = CE/BG → ${(gain_actual*100).toFixed(1)}%</b>${gainMsg}`;
+      fb.innerHTML = `<b>gain_ratio = CE/BH → ${(gain_actual*100).toFixed(1)}%</b>${gainMsg}`;
     } else {
       fb.style.display = 'block';
-      fb.innerHTML = `gain_ratio = CE/BG = CMX<sub>BW</sub>·T / HBM+DRAM<br><b>→ ${(gain_ratio*100).toFixed(1)}%</b>${gainMsg}`;
+      fb.innerHTML = `gain_ratio = CE/BH = CMX<sub>BW</sub>·CMX_Ttools / HBM+DRAM<br><b>→ ${(gain_ratio*100).toFixed(1)}%</b>${gainMsg}`;
     }
   }
 
@@ -745,6 +753,7 @@ function generate() {
     return x <= x_B_GB ? slope * x : RECOMP;
   };
 
+/* EFFICIENCY VIEW — commented out
   const mkTrace2 = (yFn, col, name) => {
     const px = [], py = [];
     xs_samp.forEach(x => { const y = yFn(x); px.push(y / x); py.push(y); });
@@ -801,10 +810,11 @@ function generate() {
     legend:{ x:1.02, y:0.99, xanchor:'left', yanchor:'top', font:{size:10},
              bgcolor:'rgba(255,255,255,0.8)', bordercolor:'#ccc', borderwidth:1 },
     plot_bgcolor:'white', paper_bgcolor:'white',
-    margin:{ t:50, r:160, b:80, l:65 },
+    margin:{ t:50, r:220, b:110, l:120 },
     height: 500
   };
   Plotly.react('chart2', traces2, layout2, { responsive:true, displayModeBar:false });
+*/
 }
 
 window.onload = onHistChange;
