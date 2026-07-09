@@ -106,12 +106,17 @@
           </tr>
         </tbody>
       </table>
+      <!-- Ttools distribution visualizer with draggable τ -->
+      <div style="margin-top:12px;position:relative;">
+        <svg id="dist-svg" style="width:100%;height:110px;display:block;cursor:default;"></svg>
+      </div>
+
       <div style="margin-top:10px;display:flex;align-items:center;gap:10px;">
         <label style="font-size:13px;font-weight:bold;">CMX threshold τ (s):</label>
         <input type="number" id="tau" value="0" min="0" step="1" style="width:80px;" oninput="onHistChange()">
         <span style="font-size:11px;color:#888;">requests with Ttools &gt; τ → CMX</span>
-        <label style="font-size:13px;font-weight:bold;margin-left:16px;">fraction at exactly τ → CMX:</label>
-        <input type="number" id="tau_frac" value="0.15" min="0" max="1" step="0.05" style="width:70px;" oninput="onHistChange()">
+        <label style="font-size:13px;font-weight:bold;margin-left:16px;">fraction at exactly τ → HBM:</label>
+        <input type="number" id="tau_frac" value="0.85" min="0" max="1" step="0.05" style="width:70px;" oninput="onHistChange()">
         <span style="font-size:11px;color:#888;">(0 = none, 1 = all)</span>
       </div>
       <div id="derived-display" style="margin-top:8px;font-size:12px;color:#444;background:#f0f4ff;border-radius:6px;padding:6px 12px;display:inline-block;"></div>
@@ -137,6 +142,7 @@
     <div class="stat"><div class="val" id="s-with">—</div><div class="lbl">reqs/sec with CMX</div></div>
     <div class="stat"><div class="val" id="s-without">—</div><div class="lbl">reqs/sec without CMX</div></div>
     <div class="stat"><div class="val" id="s-gain" style="color:#c0392b">—</div><div class="lbl">gain ratio</div></div>
+    <div class="stat"><div class="val" id="s-vs-avg" style="color:#7b2fbe">—</div><div class="lbl">vs avg-only</div></div>
   </div>
 
   <div id="chart"></div>
@@ -165,6 +171,144 @@ function showError(msg) {
   Plotly.purge('chart');
   document.getElementById('formula-box').style.display = 'none';
   document.getElementById('distances-box').style.display = 'none';
+}
+
+const DIST_ML=50, DIST_MR=20, DIST_MT=14, DIST_MB=28;
+
+function drawDistSVG() {
+  const svg = document.getElementById('dist-svg');
+  if (!svg) return;
+  const rows = document.querySelectorAll('#hist-body tr');
+  let hist = [];
+  for (const row of rows) {
+    const pct = parseFloat(row.querySelector('.h-pct').value) || 0;
+    const lat = parseFloat(row.querySelector('.h-lat').value) || 0;
+    hist.push({pct, lat});
+  }
+  if (!hist.length) return;
+
+  const tau      = parseFloat(document.getElementById('tau').value) || 0;
+  const tau_frac = Math.min(1, Math.max(0, parseFloat(document.getElementById('tau_frac').value) || 0));
+  const sortedLats = [...new Set(hist.map(r => r.lat))].sort((a,b) => a-b);
+  const maxLat   = Math.max(...sortedLats) * 1.2 || 1;
+  const maxPct   = Math.max(...hist.map(r => r.pct), 1);
+  const W        = svg.getBoundingClientRect().width || 560;
+  const H        = 110;
+  const plotW    = W - DIST_ML - DIST_MR;
+  const plotH    = H - DIST_MT - DIST_MB;
+  const toX      = lat => DIST_ML + (lat / maxLat) * plotW;
+  const toY      = pct => DIST_MT + plotH - (pct / maxPct) * plotH;
+  const minGapPx = sortedLats.length > 1
+    ? Math.min(...sortedLats.slice(1).map((lat, i) => toX(lat) - toX(sortedLats[i])))
+    : plotW;
+  const barW     = Math.max(10, Math.min(44, minGapPx * 0.6, plotW / (sortedLats.length + 1) * 0.6));
+
+  // Circle position encodes both tau and tau_frac
+  const handleX  = toX(tau) - barW/2 + tau_frac * barW;
+  const hY       = DIST_MT + plotH + 14;
+
+  let html = `<rect x="${DIST_ML}" y="${DIST_MT}" width="${plotW}" height="${plotH}" fill="#fafafa" stroke="#ddd" stroke-width="1"/>`;
+
+  // HBM / CMX background shading split at handleX
+  html += `<rect x="${DIST_ML}" y="${DIST_MT}" width="${Math.max(0,handleX-DIST_ML)}" height="${plotH}" fill="rgba(180,180,180,0.10)"/>`;
+  html += `<rect x="${handleX}" y="${DIST_MT}" width="${Math.max(0,DIST_ML+plotW-handleX)}" height="${plotH}" fill="rgba(74,144,217,0.09)"/>`;
+
+  // Bars
+  hist.forEach(({pct, lat}) => {
+    const x   = toX(lat);
+    const y   = toY(pct);
+    const bh  = plotH - (y - DIST_MT);
+    const bL  = x - barW/2;
+    const bR  = x + barW/2;
+    if (handleX > bL && handleX < bR && pct > 0) {
+      // Split this bar at handleX
+      const hmbW = handleX - bL;
+      const cmxW = bR - handleX;
+      if (hmbW > 0.5) html += `<rect x="${bL}" y="${y}" width="${hmbW}" height="${bh}" fill="#bbb" rx="2"/>`;
+      if (cmxW > 0.5) html += `<rect x="${handleX}" y="${y}" width="${cmxW}" height="${bh}" fill="#4A90D9" rx="2"/>`;
+    } else {
+      const fill = x + barW/2 <= handleX ? '#bbb' : '#4A90D9';
+      html += `<rect x="${bL}" y="${y}" width="${barW}" height="${bh}" fill="${fill}" rx="2" opacity="0.9"/>`;
+    }
+    html += `<text x="${x}" y="${y-3}" text-anchor="middle" font-size="9" fill="#555">${pct}%</text>`;
+    html += `<text x="${x}" y="${H-DIST_MB+14}" text-anchor="middle" font-size="9" fill="#555">${lat}s</text>`;
+  });
+
+  // Vertical guide line
+  html += `<line x1="${handleX}" y1="${DIST_MT}" x2="${handleX}" y2="${hY-11}" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.5"/>`;
+
+  // HBM / CMX labels
+  if (handleX - DIST_ML > 40) html += `<text x="${(DIST_ML+handleX)/2}" y="${DIST_MT+plotH/2+5}" text-anchor="middle" font-size="11" fill="#aaa" pointer-events="none">HBM</text>`;
+  if (DIST_ML+plotW - handleX > 40) html += `<text x="${(handleX+DIST_ML+plotW)/2}" y="${DIST_MT+plotH/2+5}" text-anchor="middle" font-size="11" fill="#4A90D9" pointer-events="none">CMX</text>`;
+
+  // Single drag circle (tabindex makes it keyboard-focusable)
+  html += `<circle id="drag-handle" cx="${handleX}" cy="${hY}" r="10" fill="#c0392b" stroke="white" stroke-width="2.5" style="cursor:ew-resize;outline:none" tabindex="0"/>`;
+  html += `<text x="${handleX}" y="${hY+24}" text-anchor="middle" font-size="9" fill="#c0392b" pointer-events="none">τ=${tau}s</text>`;
+
+  svg.setAttribute('height', H + 28);
+  svg.innerHTML = html;
+
+  // Drag logic
+  const handle = document.getElementById('drag-handle');
+  if (!handle) return;
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const rect = svg.getBoundingClientRect();
+    const onMove = e => {
+      const mouseX = e.clientX - rect.left;
+      // Find which bin contains mouseX
+      let matched = false;
+      for (const lat of sortedLats) {
+        const bL = toX(lat) - barW/2;
+        const bR = toX(lat) + barW/2;
+        if (mouseX >= bL && mouseX <= bR) {
+          // Within this bin: tau fixed, only tau_frac changes
+          document.getElementById('tau').value      = lat;
+          document.getElementById('tau_frac').value = ((mouseX - bL) / barW).toFixed(2);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // Between bins: tau moves proportionally with mouse, tau_frac = 0
+        // Offset by barW/2 so handleX = toX(tau) - barW/2 + 0 tracks the mouse exactly
+        const rawTau = Math.max(0, (mouseX - DIST_ML + barW/2) / plotW * maxLat);
+        document.getElementById('tau').value      = Math.round(rawTau);
+        document.getElementById('tau_frac').value = '0';
+      }
+      onHistChange();
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  // Keyboard nudge: arrow keys move by 1px, Shift+arrow by 8px
+  handle.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const step = e.shiftKey ? 8 : 1;
+    const curX = parseFloat(handle.getAttribute('cx'));
+    const mouseX = curX + (e.key === 'ArrowRight' ? step : -step);
+    // Reuse same bin logic
+    let matched = false;
+    for (const lat of sortedLats) {
+      const bL = toX(lat) - barW/2;
+      const bR = toX(lat) + barW/2;
+      if (mouseX >= bL && mouseX <= bR) {
+        document.getElementById('tau').value      = lat;
+        document.getElementById('tau_frac').value = ((mouseX - bL) / barW).toFixed(2);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      const rawTau = Math.max(0, (mouseX - DIST_ML + barW/2) / plotW * maxLat);
+      document.getElementById('tau').value      = Math.round(rawTau);
+      document.getElementById('tau_frac').value = '0';
+    }
+    onHistChange();
+  });
 }
 
 function addHistRow() {
@@ -215,12 +359,13 @@ function onHistChange() {
     const TAU_FRAC  = Math.min(1, Math.max(0, parseFloat(document.getElementById('tau_frac').value) || 0));
     const cmxRows   = hist.filter(r => r.lat > TAU);
     const atTauRows = hist.filter(r => r.lat === TAU);
-    const cmxPct    = cmxRows.reduce((s, r) => s + r.pct, 0) + atTauRows.reduce((s, r) => s + r.pct * TAU_FRAC, 0);
+    const cmxPct    = cmxRows.reduce((s, r) => s + r.pct, 0) + atTauRows.reduce((s, r) => s + r.pct * (1 - TAU_FRAC), 0);
     const CMX_RATIO = cmxPct / 100;
     const CMX_TTOOLS = CMX_RATIO > 0
-      ? (cmxRows.reduce((s, r) => s + r.pct * r.lat, 0) + atTauRows.reduce((s, r) => s + r.pct * TAU_FRAC * r.lat, 0)) / (CMX_RATIO * 100)
+      ? (cmxRows.reduce((s, r) => s + r.pct * r.lat, 0) + atTauRows.reduce((s, r) => s + r.pct * (1 - TAU_FRAC) * r.lat, 0)) / (CMX_RATIO * 100)
       : 0;
     updateDerivedDisplay(T, CMX_RATIO, CMX_TTOOLS);
+    drawDistSVG();
     generate();
   }
 }
@@ -239,10 +384,10 @@ function computeReqsSec(hist, tau, tauFrac, CMX_BW, HBM, RECOMP, SOL, AVG) {
   const cmxRows   = hist.filter(r => r.lat > tau);
   const atTauRows = hist.filter(r => r.lat === tau);
   const cmxPct    = cmxRows.reduce((s, r) => s + r.pct, 0)
-                  + atTauRows.reduce((s, r) => s + r.pct * tauFrac, 0);
+                  + atTauRows.reduce((s, r) => s + r.pct * (1 - tauFrac), 0);
   const CMX_RATIO  = cmxPct / 100;
   const CMX_TTOOLS = CMX_RATIO > 0
-    ? (cmxRows.reduce((s, r) => s + r.pct * r.lat, 0) + atTauRows.reduce((s, r) => s + r.pct * tauFrac * r.lat, 0)) / (CMX_RATIO * 100)
+    ? (cmxRows.reduce((s, r) => s + r.pct * r.lat, 0) + atTauRows.reduce((s, r) => s + r.pct * (1 - tauFrac) * r.lat, 0)) / (CMX_RATIO * 100)
     : 0;
   if (CMX_RATIO <= 0 || CMX_RATIO >= 1) return -1;
   const slope           = 1.0 / (AVG * T);
@@ -325,10 +470,10 @@ function generate() {
   const TAU_FRAC   = Math.min(1, Math.max(0, parseFloat(document.getElementById('tau_frac').value) || 0));
   const cmxRows    = hist.filter(r => r.lat > TAU);
   const atTauRows  = hist.filter(r => r.lat === TAU);
-  const cmxPct     = cmxRows.reduce((s, r) => s + r.pct, 0) + atTauRows.reduce((s, r) => s + r.pct * TAU_FRAC, 0);
+  const cmxPct     = cmxRows.reduce((s, r) => s + r.pct, 0) + atTauRows.reduce((s, r) => s + r.pct * (1 - TAU_FRAC), 0);
   const CMX_RATIO  = cmxPct / 100;
   const CMX_TTOOLS = CMX_RATIO > 0
-    ? (cmxRows.reduce((s, r) => s + r.pct * r.lat, 0) + atTauRows.reduce((s, r) => s + r.pct * TAU_FRAC * r.lat, 0)) / (CMX_RATIO * 100)
+    ? (cmxRows.reduce((s, r) => s + r.pct * r.lat, 0) + atTauRows.reduce((s, r) => s + r.pct * (1 - TAU_FRAC) * r.lat, 0)) / (CMX_RATIO * 100)
     : 0;
   updateDerivedDisplay(T, CMX_RATIO, CMX_TTOOLS);
   if (CMX_RATIO <= 0 || CMX_RATIO >= 1) {
@@ -363,6 +508,15 @@ function generate() {
     : hbm_small ? (y_C_actual - RECOMP) / RECOMP
     : (y_C_actual - y_B) / y_B;
   const CMX_draw_lvl = Math.min(CMX_REQ_SEC, SOL);  // green never exceeds SOL
+
+  // ── Avg-only baseline: all requests in CMX with T (total avg), no tiering ──
+  // CMX_RATIO=1 → cap_ratio=∞, so CMX_T_GB_eff_avg = CMX_BW * T
+  const avg_x_C_GB     = HBM + CMX_BW * T;
+  const avg_y_C        = avg_x_C_GB * slope;
+  const avg_y_C_actual = Math.min(avg_y_C, SOL);
+  const gain_avg       = hbm_sufficient ? 0
+    : hbm_small ? (avg_y_C_actual - RECOMP) / RECOMP
+    : (avg_y_C_actual - y_B) / y_B;
 
   // ── Degenerate case checks ───────────────────────────────────────────────
   const errs = [];
@@ -404,6 +558,18 @@ function generate() {
     gainEl.style.color = '#c0392b';
     gainEl.style.fontSize = '';
     gainLblEl.textContent = 'gain ratio';
+  }
+
+  // ── vs avg-only stat ─────────────────────────────────────────────────────
+  const vsAvgEl = document.getElementById('s-vs-avg');
+  if (ratioExceedsHW || gain_avg <= 0) {
+    vsAvgEl.textContent = '—';
+  } else if (gain_actual <= gain_avg) {
+    vsAvgEl.textContent = (gain_actual * 100).toFixed(1) + '% (≤ avg)';
+  } else {
+    const factor = gain_actual / gain_avg;
+    vsAvgEl.textContent = factor.toFixed(2) + '× gain';
+    vsAvgEl.nextElementSibling.textContent = `vs avg (${(gain_avg*100).toFixed(1)}%)`;
   }
 
   // ── Layout constants ─────────────────────────────────────────────────────
